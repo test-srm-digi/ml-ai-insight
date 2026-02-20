@@ -43,7 +43,7 @@ _state = {
     "last_raw_df": None,
 }
 
-MODEL_DIR = os.environ.get("MODEL_PATH", str(Path(__file__).resolve().parent.parent / "models"))
+MODEL_DIR = os.environ.get("MODEL_PATH", str(Path(__file__).resolve().parent.parent.parent.parent / "models"))
 
 
 def _load_model():

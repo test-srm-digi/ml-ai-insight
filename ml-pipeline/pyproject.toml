@@ -1,12 +1,12 @@
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "vuln-insight"
 version = "0.1.0"
 description = "ML-powered vulnerability risk intelligence system"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 
 [tool.setuptools.packages.find]
 where = ["src"]
