@@ -1,0 +1,173 @@
+# Feature Vector Schema Definition
+# Total: ~275 features across 7 blocks
+# Each feature has: name, type, block, source_field, description
+
+blocks:
+  cve_core:
+    description: "CVE metadata and CVSS vector features"
+    count: 32
+    features:
+      - {name: severity_numeric, type: int, source: severity, desc: "CRITICAL=4, HIGH=3, MEDIUM=2, LOW=1, UNKNOWN=0"}
+      - {name: cvss_score, type: float, source: cvss_score, desc: "Raw CVSS score 0-10"}
+      - {name: epss_score, type: float, source: epss_score, desc: "EPSS probability 0-1"}
+      - {name: epss_percentile, type: float, source: epss_percentile, desc: "EPSS percentile 0-1"}
+      - {name: days_since_published, type: int, source: published_date, desc: "Days since CVE published"}
+      - {name: days_since_modified, type: int, source: modified_date, desc: "Days since last modified"}
+      - {name: is_withdrawn, type: binary, source: title, desc: "1 if advisory is withdrawn"}
+      - {name: has_patch, type: binary, source: has_patch, desc: "1 if patch available"}
+      - {name: num_references, type: int, source: num_references, desc: "Number of CVE references"}
+      - {name: num_sources, type: int, source: sources, desc: "Number of reporting sources"}
+      # CVSS vector one-hot features (22)
+      - {name: attack_vector_network, type: binary, source: cvss_vector}
+      - {name: attack_vector_local, type: binary, source: cvss_vector}
+      - {name: attack_vector_adjacent, type: binary, source: cvss_vector}
+      - {name: attack_vector_physical, type: binary, source: cvss_vector}
+      - {name: attack_complexity_low, type: binary, source: cvss_vector}
+      - {name: attack_complexity_high, type: binary, source: cvss_vector}
+      - {name: privileges_required_none, type: binary, source: cvss_vector}
+      - {name: privileges_required_low, type: binary, source: cvss_vector}
+      - {name: privileges_required_high, type: binary, source: cvss_vector}
+      - {name: user_interaction_required, type: binary, source: cvss_vector}
+      - {name: user_interaction_none, type: binary, source: cvss_vector}
+      - {name: scope_changed, type: binary, source: cvss_vector}
+      - {name: scope_unchanged, type: binary, source: cvss_vector}
+      - {name: confidentiality_none, type: binary, source: cvss_vector}
+      - {name: confidentiality_low, type: binary, source: cvss_vector}
+      - {name: confidentiality_high, type: binary, source: cvss_vector}
+      - {name: integrity_none, type: binary, source: cvss_vector}
+      - {name: integrity_low, type: binary, source: cvss_vector}
+      - {name: integrity_high, type: binary, source: cvss_vector}
+      - {name: availability_none, type: binary, source: cvss_vector}
+      - {name: availability_low, type: binary, source: cvss_vector}
+      - {name: availability_high, type: binary, source: cvss_vector}
+
+  cwe_intelligence:
+    description: "CWE type, category, and historical exploit rate features"
+    count: 25
+    features:
+      - {name: cwe_count, type: int, source: cwes}
+      - {name: is_cwe_79, type: binary, source: cwes, desc: "XSS"}
+      - {name: is_cwe_89, type: binary, source: cwes, desc: "SQL Injection"}
+      - {name: is_cwe_22, type: binary, source: cwes, desc: "Path Traversal"}
+      - {name: is_cwe_78, type: binary, source: cwes, desc: "OS Command Injection"}
+      - {name: is_cwe_601, type: binary, source: cwes, desc: "Open Redirect"}
+      - {name: is_cwe_94, type: binary, source: cwes, desc: "Code Injection"}
+      - {name: is_cwe_287, type: binary, source: cwes, desc: "Improper Authentication"}
+      - {name: is_cwe_502, type: binary, source: cwes, desc: "Deserialization"}
+      - {name: is_cwe_918, type: binary, source: cwes, desc: "SSRF"}
+      - {name: is_cwe_1286, type: binary, source: cwes, desc: "Improper Validation"}
+      - {name: cwe_is_injection, type: binary, source: cwes, desc: "CWE in injection family"}
+      - {name: cwe_is_web_related, type: binary, source: cwes, desc: "CWE in web family"}
+      - {name: cwe_is_memory_related, type: binary, source: cwes, desc: "CWE in memory family"}
+      - {name: cwe_is_auth_related, type: binary, source: cwes, desc: "CWE in auth family"}
+      - {name: cwe_is_crypto_related, type: binary, source: cwes, desc: "CWE in crypto family"}
+      - {name: cwe_is_deserialization, type: binary, source: cwes}
+      - {name: cwe_historical_exploit_rate, type: float, source: primary_cwe}
+      - {name: cwe_global_frequency, type: float, source: primary_cwe}
+      - {name: cwe_primary_encoded, type: int, source: primary_cwe}
+
+  dependency:
+    description: "Package, dependency tree, and version features"
+    count: 40
+    features:
+      - {name: dependency_depth, type: int, source: transitive_dep_count}
+      - {name: is_direct_dependency, type: binary, source: transitive_dep_count}
+      - {name: is_transitive_dependency, type: binary, source: transitive_dep_count}
+      - {name: transitive_dep_count, type: int, source: transitive_dep_count}
+      - {name: version_gap_major, type: int, source: "package_version,fix_versions"}
+      - {name: version_gap_minor, type: int, source: "package_version,fix_versions"}
+      - {name: version_gap_patch, type: int, source: "package_version,fix_versions"}
+      - {name: is_major_upgrade, type: binary, source: version_gap_major}
+      - {name: num_fix_versions, type: int, source: fix_versions}
+      - {name: num_affected_ranges, type: int, source: num_affected_ranges}
+      - {name: has_fix_available, type: binary, source: fix_versions}
+      - {name: package_ecosystem_npm, type: binary, source: ecosystem}
+      - {name: package_ecosystem_pypi, type: binary, source: ecosystem}
+      - {name: package_ecosystem_maven, type: binary, source: ecosystem}
+      - {name: package_ecosystem_go, type: binary, source: ecosystem}
+      - {name: package_ecosystem_nuget, type: binary, source: ecosystem}
+      - {name: package_ecosystem_rubygems, type: binary, source: ecosystem}
+      - {name: package_ecosystem_cargo, type: binary, source: ecosystem}
+      - {name: package_ecosystem_composer, type: binary, source: ecosystem}
+      - {name: package_name_frequency, type: int, source: package_name}
+      - {name: package_name_cve_density, type: float, source: package_name}
+
+  repo_behavior:
+    description: "Per-repo aggregated behavioral statistics"
+    count: 40
+    features:
+      - {name: repo_total_cves, type: int, source: repo}
+      - {name: repo_cve_count_30d, type: int, source: repo}
+      - {name: repo_cve_count_90d, type: int, source: repo}
+      - {name: repo_critical_count, type: int, source: repo}
+      - {name: repo_high_count, type: int, source: repo}
+      - {name: repo_medium_count, type: int, source: repo}
+      - {name: repo_low_count, type: int, source: repo}
+      - {name: repo_fix_rate, type: float, source: repo}
+      - {name: repo_false_positive_rate, type: float, source: repo}
+      - {name: repo_skip_rate, type: float, source: repo}
+      - {name: repo_avg_cvss, type: float, source: repo}
+      - {name: repo_max_cvss, type: float, source: repo}
+      - {name: repo_avg_epss, type: float, source: repo}
+      - {name: repo_severity_ratio_critical, type: float, source: repo}
+      - {name: repo_severity_ratio_high, type: float, source: repo}
+      - {name: repo_unique_packages, type: int, source: repo}
+      - {name: repo_unique_cwes, type: int, source: repo}
+      - {name: repo_has_patch_rate, type: float, source: repo}
+      - {name: repo_avg_transitive_deps, type: float, source: repo}
+      - {name: repo_cve_velocity, type: float, source: repo}
+
+  time_exposure:
+    description: "Temporal features, exposure windows, and risk dynamics"
+    count: 20
+    features:
+      - {name: detection_delay_days, type: int, source: "detection_time,published_date"}
+      - {name: patch_available_delay, type: int, source: "has_patch,published_date,detection_time"}
+      - {name: cve_age_days, type: int, source: published_date}
+      - {name: exposure_window_days, type: int, source: "has_patch,published_date"}
+      - {name: days_since_detection, type: int, source: detection_time}
+      - {name: is_recent_cve, type: binary, source: published_date}
+      - {name: is_old_cve, type: binary, source: published_date}
+      - {name: is_exploit_known, type: binary, source: "references,num_references"}
+      - {name: patch_age_days, type: int, source: "has_patch,modified_date"}
+      - {name: time_to_patch_ratio, type: float, source: "detection_delay_days,cve_age_days"}
+      - {name: epss_cvss_ratio, type: float, source: "epss_score,cvss_score"}
+      - {name: risk_acceleration, type: float, source: "epss_score,days_since_published"}
+      - {name: severity_age_interaction, type: float, source: "severity_numeric,cve_age_days"}
+      - {name: source_diversity, type: float, source: num_sources}
+      - {name: reference_density, type: float, source: "num_references,cve_age_days"}
+
+  text_embeddings:
+    description: "PCA-reduced sentence embeddings of CVE descriptions + text features"
+    count: 105
+    model: "all-MiniLM-L6-v2"
+    pca_components: 100
+    features:
+      - {name: "text_embed_0 through text_embed_99", type: float, source: cve_description, desc: "PCA-reduced 384-dim to 100-dim"}
+      - {name: description_length, type: int, source: cve_description}
+      - {name: description_word_count, type: int, source: cve_description}
+      - {name: description_has_exploit_mention, type: binary, source: cve_description}
+      - {name: description_has_rce_mention, type: binary, source: cve_description}
+      - {name: description_has_dos_mention, type: binary, source: cve_description}
+
+  user_behavior:
+    description: "Historical user decision patterns per CWE, package, severity, repo"
+    count: 20
+    note: "Uses full dataset aggregates. In production, use leave-one-out to prevent target leakage."
+    features:
+      - {name: historical_fix_rate_same_cwe, type: float, source: "primary_cwe,user_action"}
+      - {name: historical_fix_rate_same_package, type: float, source: "package_name,user_action"}
+      - {name: historical_fix_rate_same_severity, type: float, source: "severity,user_action"}
+      - {name: historical_fix_rate_same_repo, type: float, source: "repo,user_action"}
+      - {name: historical_skip_rate_same_cwe, type: float, source: "primary_cwe,user_action"}
+      - {name: historical_skip_rate_same_package, type: float, source: "package_name,user_action"}
+      - {name: historical_skip_rate_same_severity, type: float, source: "severity,user_action"}
+      - {name: historical_skip_rate_same_repo, type: float, source: "repo,user_action"}
+      - {name: historical_fp_rate_same_cwe, type: float, source: "primary_cwe,user_action"}
+      - {name: historical_fp_rate_same_package, type: float, source: "package_name,user_action"}
+      - {name: historical_fp_rate_same_severity, type: float, source: "severity,user_action"}
+      - {name: historical_fp_rate_same_repo, type: float, source: "repo,user_action"}
+      - {name: cwe_action_consistency, type: float, source: "primary_cwe,user_action"}
+      - {name: package_action_consistency, type: float, source: "package_name,user_action"}
+      - {name: repo_action_diversity, type: float, source: "repo,user_action"}
+      - {name: severity_action_alignment, type: float, source: "severity,user_action"}

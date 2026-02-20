@@ -1,0 +1,29 @@
+training:
+  objective: "binary:logistic"
+  eval_metric: "auc"
+  max_depth: 6
+  eta: 0.05
+  subsample: 0.8
+  colsample_bytree: 0.8
+  lambda: 1.0
+  alpha: 0.5
+  seed: 42
+  num_boost_round: 500
+  early_stopping_rounds: 50
+  test_size: 0.2
+
+scoring:
+  weights:
+    ml: 0.45
+    cvss: 0.20
+    epss: 0.15
+    exposure: 0.10
+    repo_criticality: 0.10
+  tiers:
+    critical: 0.8
+    high: 0.6
+    medium: 0.4
+
+embeddings:
+  model_name: "all-MiniLM-L6-v2"
+  pca_components: 100

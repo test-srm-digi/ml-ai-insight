@@ -1,0 +1,86 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# ML artifacts — trained models, data, plots
+ml-pipeline/models/
+ml-pipeline/data/
+ml-pipeline/models/**/*.json
+ml-pipeline/models/**/*.npy
+ml-pipeline/models/**/*.pkl
+ml-pipeline/models/**/*.csv
+ml-pipeline/models/plots/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node / React
+ui/node_modules/
+ui/build/
+ui/.env.local
+ui/.env.development.local
+ui/.env.test.local
+ui/.env.production.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Java / Gradle
+api-service/.gradle/
+api-service/build/
+api-service/bin/
+api-service/out/
+*.class
+*.jar
+*.war
+
+# Docker
+docker-compose.override.yml
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+config/db_config_local.yaml
+
+# Logs
+*.log
+logs/
+
+# Test / coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/

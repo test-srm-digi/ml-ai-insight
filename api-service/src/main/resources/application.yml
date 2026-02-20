@@ -1,0 +1,33 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: vuln-risk-api
+
+# Python ML sidecar configuration
+sidecar:
+  base-url: ${SIDECAR_URL:http://localhost:5000}
+  timeout-ms: ${SIDECAR_TIMEOUT_MS:5000}
+
+# AWS Bedrock configuration
+aws:
+  region: ${AWS_REGION:us-east-1}
+  bedrock:
+    model-id: ${BEDROCK_MODEL_ID:anthropic.claude-3-sonnet-20240229-v1:0}
+    max-tokens: ${BEDROCK_MAX_TOKENS:1024}
+
+# Actuator endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    root: INFO
+    com.vulninsight: DEBUG

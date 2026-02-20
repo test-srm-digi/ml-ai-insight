@@ -1,0 +1,83 @@
+version: "3.9"
+
+services:
+  # MariaDB for vulnerability data storage
+  mariadb:
+    image: mariadb:11
+    container_name: vuln-mariadb
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: vuln_db
+      MYSQL_USER: vuln_user
+      MYSQL_PASSWORD: vuln_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Python ML sidecar — serves model predictions via FastAPI
+  ml-sidecar:
+    build:
+      context: ./ml-pipeline
+      dockerfile: Dockerfile
+    container_name: vuln-ml-sidecar
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./ml-pipeline/models:/app/models
+    environment:
+      - MODEL_PATH=/app/models
+      - LOG_LEVEL=info
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # React Dashboard UI
+  dashboard:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    container_name: vuln-dashboard
+    ports:
+      - "3000:80"
+    depends_on:
+      ml-sidecar:
+        condition: service_healthy
+
+  # Java Spring Boot API — REST endpoints for consumers
+  api-service:
+    build:
+      context: ./api-service
+      dockerfile: Dockerfile
+    container_name: vuln-api-service
+    ports:
+      - "8080:8080"
+    environment:
+      - PYTHON_SIDECAR_URL=http://ml-sidecar:8000
+      - PYTHON_SIDECAR_TIMEOUT=10000
+      - AWS_REGION=us-east-1
+      - AWS_BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
+      - SPRING_PROFILES_ACTIVE=docker
+    depends_on:
+      ml-sidecar:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
+volumes:
+  mariadb_data:

@@ -1,0 +1,14 @@
+mariadb:
+  host: "localhost"
+  port: 3306
+  database: "vuln_db"
+  user: "root"
+  password: ""
+  query: |
+    SELECT
+      repo, release_name, release_date, licence, severity, status,
+      cve_id, cwe_id, current_version, fix_package_versions,
+      detection_time, transitive_dependencies, user_action,
+      epss_score, cvss_score, cve_description, cve_weaknesses,
+      cvss_vector, sources
+    FROM vulnerability_data
