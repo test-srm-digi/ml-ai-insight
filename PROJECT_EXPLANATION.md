@@ -400,9 +400,168 @@ Trained on synthetic data (1000 records, 129 features):
 
 ---
 
-## 9. Dashboard UI
+## 9. LLM Explanation Layer (AWS Bedrock)
 
-A React-based dashboard provides visual access to all scoring results:
+Beyond SHAP feature importances, we use **AWS Bedrock (Claude)** to generate natural language risk assessments. The LLM receives structured data from our ML pipeline and produces human-readable analysis in a strict 3-section format.
+
+### How It Works
+
+```
+Scored CVE Data + SHAP Features + Repo Stats + Portfolio Context
+                          |
+                          v
+              prompt_templates.py
+         (assembles structured prompt)
+                          |
+                          v
+              bedrock_client.py
+         (sends to Claude via Bedrock API)
+                          |
+                          v
+          _parse_structured_response()
+         (splits into context/impact/remedy)
+                          |
+                          v
+              3-section JSON response
+         { context: "...", impact: "...", remedy: "..." }
+```
+
+### Credential Loading
+
+The `BedrockClient` reads AWS credentials from environment variables or a `.env` file in `ml-pipeline/`. A custom `.env` parser (no `python-dotenv` dependency) loads credentials at module import time. Variables read:
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `AWS_ACCESS_KEY_ID` | AWS access key | (required) |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key | (required) |
+| `AWS_SESSION_TOKEN` | Temporary session token | (optional) |
+| `BEDROCK_REGION` | AWS region for Bedrock | `us-east-1` |
+| `BEDROCK_MODEL_ID` | Claude model ID | `anthropic.claude-3-sonnet-20240229-v1:0` |
+
+### The 3-Section Response Format
+
+Every LLM response is parsed into exactly 3 sections:
+
+| Section | Name | Purpose |
+|---------|------|---------|
+| **I** | **Context-Awareness & Summarisation** | The "What" and "Why" -- what this vulnerability is and why it matters in context |
+| **II** | **Impact, Health & Blast Radius** | The "Risk" -- quantified exploitability, security debt, repo health metrics |
+| **III** | **Remedy & Actionable Plans** | The "Action" -- shortest path to resolution with specific versions and priorities |
+
+### Prompt Templates
+
+There are 3 prompt templates, each producing the same 3-section output format:
+
+#### 1. Single CVE Explanation Prompt (`build_structured_explanation_prompt`)
+
+**When used**: Dashboard "Get AI Analysis" button per CVE, CLI `explain.py single`
+
+**Data injected into prompt**:
+- Vulnerability details: CVE ID, severity, CVSS, EPSS, CWE, package, version, eco system, repo, published date
+- ML risk assessment: risk score, tier, ML model prediction
+- SHAP top features: top 10 features with importance values and direction (increases/decreases risk)
+- Dependency & patch info: transitive count, direct/transitive, patch availability, fix versions
+- Repository context: total CVEs, fix rate, false positive rate, avg CVSS, critical count, unique packages/CWEs
+- Portfolio context: total vulns across all repos, avg risk score, CRITICAL/HIGH counts, same-CWE count, same-package count
+- EPSS/CVSS divergence detection: auto-computed note when EPSS signals diverge from severity
+- CVE description: full text
+
+**System prompt**: `"You are a senior security analyst AI. Analyse the following vulnerability data and provide a structured risk assessment."`
+
+**Response instructions given to the LLM**:
+
+```
+## I. Context-Awareness & Summarisation
+- What is this vulnerability and why does it matter in this specific context?
+- How does the ML-based risk tier compare to the raw NVD severity? If they differ,
+  explain why the model re-ranked it (using SHAP factors).
+- Has this CWE type appeared before in this repo? Is there a recurrence pattern?
+- Is the EPSS score divergent from CVSS in a meaningful way?
+- Is this a direct or transitive dependency? What does that mean for remediation effort?
+
+## II. Impact, Health & Blast Radius
+- What is the exploitability profile? (network-exploitable? auth required? user interaction?)
+- What is the EPSS-based exploit likelihood and how does it compare to the portfolio average?
+- What is the security debt situation? (days since published, patch availability)
+- What is the repository health? (fix rate, CVE velocity, critical count trends)
+- Is this a transitive dependency risk? How deep in the dependency tree?
+- How does this CVE's risk score compare to the portfolio average?
+
+## III. Remedy & Actionable Plans
+- Is a patch available? If yes, what version should they upgrade to?
+- Based on historical data, how likely is this team to fix this type of issue? (cite fix rate)
+- What is the recommended action? (Fix immediately / Schedule for next sprint / Accept risk)
+- Are there architectural or configuration-level mitigations for this CWE class?
+- What is the priority relative to other open vulnerabilities?
+```
+
+**Key constraint**: `"Only include points you can support with the data above. Be specific with numbers. Do not invent data not provided above."`
+
+#### 2. Portfolio Summary Prompt (`build_portfolio_prompt`)
+
+**When used**: Dashboard "AI Insights" tab, CLI `explain.py portfolio`
+
+**Data injected into prompt**:
+- Portfolio overview: total vulnerabilities, avg risk score, tier distribution (CRITICAL/HIGH/MEDIUM/LOW counts), unique repos, unique packages
+- Top riskiest repositories: repo name, avg risk, CVE count, critical count, fix rate
+- Top critical vulnerabilities: CVE ID, risk score, tier, package, CWE
+- CWE patterns: most frequent CWEs with occurrence counts and fix rates
+- Most affected packages: package name, CVE count, avg risk score
+
+**System prompt**: `"You are a senior security analyst AI. Generate a structured portfolio-level risk assessment."`
+
+**Response instructions given to the LLM**:
+
+```
+## I. Context-Awareness & Summarisation
+- What is the overall security posture? Summarise in 2-3 sentences.
+- Which CWE types keep recurring? Is there a systemic weakness pattern?
+- How is risk distributed across repos? Is it concentrated or spread?
+- Are there packages that contribute disproportionately to the vulnerability count?
+- What does the CRITICAL/HIGH ratio tell us about urgency?
+
+## II. Impact, Health & Blast Radius
+- How many vulnerabilities are CRITICAL or HIGH tier? What percentage of total?
+- Which repos have the highest risk concentration? What is their fix rate?
+- What is the security debt profile? (avg risk score, critical count)
+- Are there cross-cutting packages that affect multiple repos?
+- What CWE clusters dominate? What does that imply about the attack surface?
+
+## III. Remedy & Actionable Plans
+- What are the top 3-5 actions that would reduce the most risk? (specific packages/repos)
+- Which repos need the most attention based on fix rate and critical count?
+- Are there "single upgrade" opportunities where one package upgrade fixes multiple CVEs?
+- What CWE-class level mitigations could neutralise multiple vulnerabilities at once?
+- What should be the remediation priority order?
+```
+
+#### 3. ML Pattern Analysis Prompt (`build_pattern_analysis_prompt`)
+
+**When used**: CLI `explain.py` for model introspection
+
+**Data injected**: Top 15 SHAP feature importances, cluster analysis data
+
+**Response format**: 3 free-form sections -- Pattern Interpretation, Actionable Insights, Model Observations.
+
+### Prompt Design Principles
+
+| Principle | How We Apply It |
+|-----------|----------------|
+| **Data-grounded** | Every prompt includes "Only include points you can support with the data above. Do not invent data not provided." |
+| **Specific over vague** | Instructions say "Be specific with numbers" and "cite the fix rate" |
+| **Dynamic context** | Prompts are assembled programmatically -- sections for repo context, portfolio context, SHAP features are only included when data exists |
+| **EPSS/CVSS divergence** | Auto-detected in code before prompt assembly. If EPSS >> normalised CVSS, a divergence note is injected. If high CVSS but low EPSS, a different note is injected. |
+| **Concise output** | "Keep each section concise (3-6 bullet points)" prevents LLM verbosity |
+
+### Response Parsing
+
+The raw LLM text is parsed by `_parse_structured_response()` which scans for section headers (`## I.`, `## II.`, `## III.` and variants) and splits the text into a `{context, impact, remedy}` dictionary. If parsing fails (LLM didn't follow the format), all text goes into the `context` field as a fallback.
+
+---
+
+## 10. Dashboard UI
+
+A React-based dashboard provides visual access to all scoring results and AI-powered explanations:
 
 | Component | What It Shows |
 |-----------|--------------|
@@ -413,17 +572,44 @@ A React-based dashboard provides visual access to all scoring results:
 | **Top Repos Chart** | Top 10 repositories by average risk |
 | **Top Packages Chart** | Top 10 packages by vulnerability count |
 | **Vulnerability Table** | Sortable, filterable, paginated table of all results |
-| **CVE Detail Modal** | Click any CVE to see full detail + SHAP feature importance |
+| **CVE Detail Modal** | Click any CVE to see full detail + SHAP feature importance + AI analysis |
+| **AI Analysis (per-CVE)** | "Get AI Analysis" button in any CVE detail modal triggers a Bedrock call and displays a structured 3-section explanation (Context / Impact / Remedy) |
+| **AI Insights Tab** | Dedicated portfolio-level tab that generates an AI risk summary covering security posture, blast radius, and prioritised remediation actions |
+
+### AI Components
+
+| React Component | File | Purpose |
+|----------------|------|---------|
+| `AiInsights` | `ui/src/components/AiInsights.js` | Reusable 3-section tabbed display (I. Context & Summary, II. Impact & Blast Radius, III. Remedy & Action Plan). Handles loading spinner, error with retry, and markdown-style rendering (bullet points, bold text). |
+| `PortfolioInsights` | `ui/src/components/PortfolioInsights.js` | Portfolio-level AI analysis page. Shows summary stat cards (total vulns, avg risk, critical/high counts) and uses `AiInsights` for the LLM response. |
+| `VulnDetail` | `ui/src/components/VulnDetail.js` | CVE detail modal with risk breakdown, SHAP features, and a "Get AI Analysis" button that calls the per-CVE Bedrock endpoint and displays results via `AiInsights`. |
+
+### Dashboard API Endpoints
+
+The Python FastAPI backend (port 8000) serves both the dashboard data and AI explanation endpoints:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | Health check |
+| GET | `/api/model/info` | Model metadata and feature count |
+| POST | `/api/upload` | Upload CSV, run scoring, return dashboard data |
+| POST | `/api/score/sample?n=500` | Generate sample data, score, return dashboard data |
+| GET | `/api/results` | Return last scored results |
+| GET | `/api/results/table` | Paginated, filterable vulnerability table |
+| GET | `/api/vulnerability/{cve_id}` | Vulnerability detail with SHAP features |
+| GET | `/api/explain/portfolio` | AI-generated 3-section portfolio risk summary |
+| GET | `/api/explain/{cve_id}` | AI-generated 3-section explanation for a single CVE |
 
 ### Tech Stack
 
 - **Frontend**: React 18, Recharts (charts), Axios (API calls)
-- **Backend API**: Python FastAPI (serves scoring + dashboard data)
+- **Backend API**: Python FastAPI (serves scoring + dashboard data + AI explanations)
 - **Charts**: Recharts for pie charts, bar charts, histograms
+- **AI Layer**: AWS Bedrock (Claude) via `bedrock_client.py`, called from FastAPI endpoints
 
 ---
 
-## 10. Technology Stack Summary
+## 11. Technology Stack Summary
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
@@ -442,7 +628,7 @@ A React-based dashboard provides visual access to all scoring results:
 
 ---
 
-## 11. What Makes This Different from Just Using CVSS?
+## 12. What Makes This Different from Just Using CVSS?
 
 | Approach | Signals Used | Weakness |
 |----------|-------------|----------|
@@ -469,7 +655,7 @@ VulnInsight:         Risk Score 0.87 -> CRITICAL
 
 ---
 
-## 12. Future Enhancements
+## 13. Future Enhancements
 
 1. **Real data training** -- Connect to actual vulnerability management data for dramatically better model accuracy
 2. **Continuous learning** -- Retrain periodically as new fix/skip decisions are made
@@ -480,7 +666,7 @@ VulnInsight:         Risk Score 0.87 -> CRITICAL
 
 ---
 
-## 13. How to Run It
+## 14. How to Run It
 
 ```bash
 # Install

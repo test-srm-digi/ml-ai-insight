@@ -10,6 +10,7 @@ A complete ML system for prioritizing software vulnerabilities using XGBoost, 27
                         |   - CSV Upload   |
                         |   - Charts       |
                         |   - Vuln Table   |
+                        |   - AI Insights  |
                         +--------+---------+
                                  |
                         +--------v---------+
@@ -19,19 +20,13 @@ A complete ML system for prioritizing software vulnerabilities using XGBoost, 27
                         +--------+---------+
                                  |
               +------------------+------------------+
-              |                                     |
-    +---------v----------+              +-----------v---------+
-    |  XGBoost Model     |              |  Java Spring Boot   | (port 8080)
-    |  275 features      |              |  REST API           |
-    |  SHAP explainer    |              |  /api/v1/score      |
-    +--------------------+              |  /api/v1/explain    |
-                                        +---------------------+
-              |
-    +---------v----------+
-    |  AWS Bedrock       |
-    |  (Claude LLM)      |
-    |  Explanations      |
-    +--------------------+
+              |                  |                  |
+    +---------v----------+  +---v--------------+  +v--------------------+
+    |  XGBoost Model     |  | AWS Bedrock      |  | Java Spring Boot   | (port 8080)
+    |  275 features      |  | (Claude LLM)     |  | REST API           |
+    |  SHAP explainer    |  | Per-CVE analysis |  | /api/v1/score      |
+    +--------------------+  | Portfolio summary|  | /api/v1/explain    |
+                            +------------------+  +--------------------+
 ```
 
 ## Quick Start

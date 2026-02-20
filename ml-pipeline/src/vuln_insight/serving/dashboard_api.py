@@ -370,60 +370,6 @@ def _compute_portfolio_context(result_df: pd.DataFrame, vuln_row: dict) -> dict:
     return ctx
 
 
-@app.get("/api/explain/{cve_id}")
-def explain_vulnerability(cve_id: str):
-    """Generate a structured 3-section LLM explanation for a specific CVE."""
-    if _state["last_results"] is None:
-        raise HTTPException(status_code=404, detail="No results yet. Upload or score data first.")
-
-    result_df = _state["last_results"]
-    mask = result_df["cve_id"].astype(str) == cve_id
-    if mask.sum() == 0:
-        raise HTTPException(status_code=404, detail=f"CVE '{cve_id}' not found.")
-
-    row = result_df[mask].iloc[0].to_dict()
-
-    # Sanitize NaN values in row
-    for k, v in row.items():
-        if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
-            row[k] = None
-
-    # Gather SHAP features
-    shap_features = []
-    feature_imp_file = Path(MODEL_DIR) / "feature_importance.csv"
-    if feature_imp_file.exists():
-        imp_df = pd.read_csv(feature_imp_file)
-        shap_features = [(r["feature"], r["importance"]) for _, r in imp_df.head(10).iterrows()]
-
-    risk_score = float(row.get("risk_score", 0))
-    tier = row.get("tier", "UNKNOWN")
-    repo = row.get("repo", "")
-
-    repo_stats = _compute_repo_stats(result_df, repo) if repo else None
-    portfolio_context = _compute_portfolio_context(result_df, row)
-
-    try:
-        from vuln_insight.llm.bedrock_client import BedrockClient
-        client = BedrockClient()
-        explanation = client.explain_vulnerability(
-            vuln_data=row,
-            shap_features=shap_features,
-            risk_score=risk_score,
-            tier=tier,
-            repo_stats=repo_stats,
-            portfolio_context=portfolio_context,
-        )
-        return {
-            "cve_id": cve_id,
-            "context": explanation.get("context", ""),
-            "impact": explanation.get("impact", ""),
-            "remedy": explanation.get("remedy", ""),
-        }
-    except Exception as e:
-        logger.exception("Bedrock explanation failed for %s", cve_id)
-        raise HTTPException(status_code=500, detail=f"LLM explanation failed: {str(e)}")
-
-
 @app.get("/api/explain/portfolio")
 def explain_portfolio():
     """Generate a structured 3-section LLM portfolio summary."""
@@ -508,6 +454,60 @@ def explain_portfolio():
     except Exception as e:
         logger.exception("Bedrock portfolio explanation failed")
         raise HTTPException(status_code=500, detail=f"LLM portfolio explanation failed: {str(e)}")
+
+
+@app.get("/api/explain/{cve_id}")
+def explain_vulnerability(cve_id: str):
+    """Generate a structured 3-section LLM explanation for a specific CVE."""
+    if _state["last_results"] is None:
+        raise HTTPException(status_code=404, detail="No results yet. Upload or score data first.")
+
+    result_df = _state["last_results"]
+    mask = result_df["cve_id"].astype(str) == cve_id
+    if mask.sum() == 0:
+        raise HTTPException(status_code=404, detail=f"CVE '{cve_id}' not found.")
+
+    row = result_df[mask].iloc[0].to_dict()
+
+    # Sanitize NaN values in row
+    for k, v in row.items():
+        if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
+            row[k] = None
+
+    # Gather SHAP features
+    shap_features = []
+    feature_imp_file = Path(MODEL_DIR) / "feature_importance.csv"
+    if feature_imp_file.exists():
+        imp_df = pd.read_csv(feature_imp_file)
+        shap_features = [(r["feature"], r["importance"]) for _, r in imp_df.head(10).iterrows()]
+
+    risk_score = float(row.get("risk_score", 0))
+    tier = row.get("tier", "UNKNOWN")
+    repo = row.get("repo", "")
+
+    repo_stats = _compute_repo_stats(result_df, repo) if repo else None
+    portfolio_context = _compute_portfolio_context(result_df, row)
+
+    try:
+        from vuln_insight.llm.bedrock_client import BedrockClient
+        client = BedrockClient()
+        explanation = client.explain_vulnerability(
+            vuln_data=row,
+            shap_features=shap_features,
+            risk_score=risk_score,
+            tier=tier,
+            repo_stats=repo_stats,
+            portfolio_context=portfolio_context,
+        )
+        return {
+            "cve_id": cve_id,
+            "context": explanation.get("context", ""),
+            "impact": explanation.get("impact", ""),
+            "remedy": explanation.get("remedy", ""),
+        }
+    except Exception as e:
+        logger.exception("Bedrock explanation failed for %s", cve_id)
+        raise HTTPException(status_code=500, detail=f"LLM explanation failed: {str(e)}")
 
 
 if __name__ == "__main__":
