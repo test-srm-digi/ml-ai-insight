@@ -7,6 +7,7 @@ import RiskHistogram from './components/RiskHistogram';
 import TopRepos from './components/TopRepos';
 import VulnTable from './components/VulnTable';
 import VulnDetail from './components/VulnDetail';
+import PortfolioInsights from './components/PortfolioInsights';
 import './App.css';
 
 export default function App() {
@@ -61,6 +62,12 @@ export default function App() {
               >
                 All Vulnerabilities
               </button>
+              <button
+                className={`tab ${activeTab === 'ai-insights' ? 'active' : ''}`}
+                onClick={() => setActiveTab('ai-insights')}
+              >
+                AI Insights
+              </button>
             </div>
 
             {activeTab === 'overview' && (
@@ -107,6 +114,10 @@ export default function App() {
 
             {activeTab === 'table' && (
               <VulnTable onSelectCve={setSelectedCve} />
+            )}
+
+            {activeTab === 'ai-insights' && (
+              <PortfolioInsights />
             )}
           </>
         )}

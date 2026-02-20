@@ -166,14 +166,16 @@ ai-ml-insight/
 │   │   ├── App.css                # Styling
 │   │   ├── services/api.js        # Backend API client
 │   │   └── components/
-│   │       ├── Header.js          # App header
-│   │       ├── UploadPanel.js     # CSV upload & sample generator
-│   │       ├── SummaryCards.js    # KPI summary cards
-│   │       ├── TierChart.js       # Pie chart for tier distribution
-│   │       ├── RiskHistogram.js   # Risk score histogram
-│   │       ├── TopRepos.js        # Top repos/packages bar charts
-│   │       ├── VulnTable.js       # Paginated, filterable vuln table
-│   │       └── VulnDetail.js      # Vulnerability detail modal
+│   │       ├── Header.js            # App header
+│   │       ├── UploadPanel.js       # CSV upload & sample generator
+│   │       ├── SummaryCards.js      # KPI summary cards
+│   │       ├── TierChart.js         # Pie chart for tier distribution
+│   │       ├── RiskHistogram.js     # Risk score histogram
+│   │       ├── TopRepos.js          # Top repos/packages bar charts
+│   │       ├── VulnTable.js         # Paginated, filterable vuln table
+│   │       ├── VulnDetail.js        # Vulnerability detail modal + AI analysis
+│   │       ├── AiInsights.js        # Reusable 3-section AI explanation component
+│   │       └── PortfolioInsights.js # Portfolio-level AI risk analysis tab
 │   ├── Dockerfile
 │   └── nginx.conf
 ├── api-service/                   # Java Spring Boot API
@@ -331,6 +333,38 @@ The React dashboard provides:
 - **Top 10 Table**: Riskiest vulnerabilities with severity badges and tier classification
 - **Full Table View**: Paginated, sortable, filterable table with search
 - **Vulnerability Detail Modal**: Click any CVE to see risk breakdown, SHAP feature importances, and description
+- **AI Risk Analysis (per-CVE)**: Click "Get AI Analysis" in any vulnerability detail modal to generate a structured 3-section explanation via AWS Bedrock
+- **AI Insights Tab (Portfolio)**: Dedicated tab for portfolio-level AI risk analysis covering security posture, blast radius, and prioritised remediation actions
+
+### AI-Powered Explanations (3-Section Format)
+
+Both per-CVE and portfolio-level AI analyses follow a structured 3-section format:
+
+| Section | Name | What It Covers |
+|---------|------|----------------|
+| I | **Context-Awareness & Summarisation** | What the vulnerability is, why it matters, how ML tier compares to NVD severity, CWE recurrence patterns, EPSS vs CVSS divergence |
+| II | **Impact, Health & Blast Radius** | Exploitability profile, EPSS-based exploit likelihood, security debt, repo health (fix rate, CVE velocity), transitive dependency risk |
+| III | **Remedy & Actionable Plans** | Patch availability, recommended action (fix now / schedule / accept risk), CWE-class mitigations, priority relative to other vulnerabilities |
+
+The LLM only references data points that actually exist — it will not fabricate information for missing fields.
+
+---
+
+## Dashboard API Endpoints
+
+The Python FastAPI backend (port 8000) serves both the dashboard data and AI explanation endpoints:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | Health check |
+| GET | `/api/model/info` | Model metadata and feature count |
+| POST | `/api/upload` | Upload CSV, run scoring, return dashboard data |
+| POST | `/api/score/sample?n=500` | Generate sample data, score, return dashboard data |
+| GET | `/api/results` | Return last scored results |
+| GET | `/api/results/table` | Paginated, filterable vulnerability table |
+| GET | `/api/vulnerability/{cve_id}` | Vulnerability detail with SHAP features |
+| GET | `/api/explain/{cve_id}` | AI-generated 3-section explanation for a single CVE |
+| GET | `/api/explain/portfolio` | AI-generated 3-section portfolio risk summary |
 
 ---
 
@@ -379,18 +413,48 @@ Your CSV should have columns matching these names (case-insensitive, spaces allo
 
 LLM explanations are optional. To enable them:
 
-1. Configure AWS credentials:
-   ```bash
-   export AWS_ACCESS_KEY_ID=your_key
-   export AWS_SECRET_ACCESS_KEY=your_secret
-   export AWS_DEFAULT_REGION=us-east-1
-   ```
+### Option A: Environment Variables
 
-2. Ensure you have access to Claude on Bedrock in your AWS account.
+```bash
+export AWS_ACCESS_KEY_ID=your_key
+export AWS_SECRET_ACCESS_KEY=your_secret
+export AWS_SESSION_TOKEN=your_session_token   # if using temporary credentials
+export BEDROCK_REGION=us-east-1
+export BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
+```
 
-3. Use the `explain.py` CLI or the `/api/v1/explain` Java endpoint.
+### Option B: `.env` File (Recommended for Local Development)
 
-Without Bedrock, the system works fully — use `explain.py shap-only` for offline SHAP-based explanations.
+Create or edit `ml-pipeline/.env`:
+
+```env
+# AWS Bedrock Configuration
+BEDROCK_REGION=us-east-1
+BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
+AWS_ACCESS_KEY_ID=your_key
+AWS_SECRET_ACCESS_KEY=your_secret
+AWS_SESSION_TOKEN=your_session_token
+```
+
+The Bedrock client automatically reads from this `.env` file — no `python-dotenv` dependency required.
+
+### Where Bedrock is Used
+
+| Feature | How to Access |
+|---------|---------------|
+| **Per-CVE AI Analysis** | Dashboard UI → click any CVE → "Get AI Analysis" button |
+| **Portfolio AI Insights** | Dashboard UI → "AI Insights" tab → "Generate Portfolio Insights" |
+| **CLI Single CVE** | `python3 scripts/explain.py single data/scored.csv --cve-id CVE-2024-1234` |
+| **CLI Batch** | `python3 scripts/explain.py batch data/scored.csv --top-n 5` |
+| **CLI Portfolio** | `python3 scripts/explain.py portfolio data/scored.csv` |
+| **Java API** | `POST /api/v1/explain` |
+
+### Without Bedrock
+
+The system works fully without AWS credentials:
+- Use `explain.py shap-only` for offline SHAP-based explanations
+- The dashboard works completely (upload, scoring, charts, tables, SHAP features)
+- The "Get AI Analysis" button will return an error message if credentials are missing
 
 ---
 

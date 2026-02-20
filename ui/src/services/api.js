@@ -53,3 +53,13 @@ export async function checkHealth() {
   const res = await api.get('/api/health');
   return res.data;
 }
+
+export async function getExplanation(cveId) {
+  const res = await api.get(`/api/explain/${encodeURIComponent(cveId)}`);
+  return res.data;
+}
+
+export async function getPortfolioInsights() {
+  const res = await api.get('/api/explain/portfolio');
+  return res.data;
+}

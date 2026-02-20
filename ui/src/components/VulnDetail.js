@@ -1,16 +1,36 @@
-import React, { useEffect, useState } from 'react';
-import { getVulnerabilityDetail } from '../services/api';
+import React, { useEffect, useState, useCallback } from 'react';
+import { getVulnerabilityDetail, getExplanation } from '../services/api';
+import AiInsights from './AiInsights';
 
 export default function VulnDetail({ cveId, onClose }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // AI explanation state
+  const [aiData, setAiData] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState(null);
+
   useEffect(() => {
     setLoading(true);
+    setAiData(null);
+    setAiError(null);
     getVulnerabilityDetail(cveId)
       .then(setDetail)
       .catch(() => setDetail(null))
       .finally(() => setLoading(false));
+  }, [cveId]);
+
+  const handleGetAiAnalysis = useCallback(() => {
+    setAiLoading(true);
+    setAiError(null);
+    getExplanation(cveId)
+      .then(setAiData)
+      .catch((err) => {
+        const msg = err.response?.data?.detail || err.message || 'Unknown error';
+        setAiError(msg);
+      })
+      .finally(() => setAiLoading(false));
   }, [cveId]);
 
   if (!cveId) return null;
@@ -88,6 +108,34 @@ export default function VulnDetail({ cveId, onClose }) {
                 </div>
               </div>
             )}
+
+            {/* AI Analysis Section */}
+            <div className="detail-section">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <h4 style={{ marginBottom: 0 }}>AI Risk Analysis</h4>
+                {!aiData && !aiLoading && (
+                  <button className="btn-ai" onClick={handleGetAiAnalysis}>
+                    <span className="btn-ai-icon">*</span>
+                    Get AI Analysis
+                  </button>
+                )}
+              </div>
+              {(aiLoading || aiData || aiError) && (
+                <AiInsights
+                  context={aiData?.context || ''}
+                  impact={aiData?.impact || ''}
+                  remedy={aiData?.remedy || ''}
+                  loading={aiLoading}
+                  error={aiError}
+                  onRetry={handleGetAiAnalysis}
+                />
+              )}
+              {!aiData && !aiLoading && !aiError && (
+                <p style={{ fontSize: 13, color: '#64748b' }}>
+                  Click "Get AI Analysis" to generate a detailed risk assessment using AI.
+                </p>
+              )}
+            </div>
           </div>
         )}
 

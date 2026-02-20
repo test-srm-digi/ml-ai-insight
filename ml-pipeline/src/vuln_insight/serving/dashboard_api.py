@@ -1,9 +1,11 @@
 """FastAPI backend for the VulnInsight dashboard UI.
 
-Provides endpoints for CSV upload, scoring, visualization data, and model info.
+Provides endpoints for CSV upload, scoring, visualization data, model info,
+and LLM-powered vulnerability explanations via AWS Bedrock.
 """
 import io
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -24,6 +26,8 @@ from vuln_insight.data.transformers import create_label, to_canonical
 from vuln_insight.features.pipeline import FeaturePipeline
 from vuln_insight.scoring.hybrid_scorer import HybridScorer, classify_tier
 from vuln_insight.scoring.tier_classifier import tier_summary
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="VulnInsight Dashboard API", version="1.0.0")
 
@@ -326,6 +330,184 @@ def _build_dashboard_response(result: pd.DataFrame) -> dict:
         "top_vulnerabilities": top10,
         "scored_at": datetime.utcnow().isoformat(),
     }
+
+
+def _compute_repo_stats(result_df: pd.DataFrame, repo: str) -> dict:
+    """Compute repo-level statistics for a given repo."""
+    repo_rows = result_df[result_df["repo"] == repo]
+    if repo_rows.empty:
+        return {}
+    return {
+        "repo_total_cves": int(len(repo_rows)),
+        "repo_cve_count_30d": int(len(repo_rows)),  # approximation with available data
+        "repo_fix_rate": float(
+            (repo_rows["user_action"] == "fixed").mean()
+        ) if "user_action" in repo_rows.columns else None,
+        "repo_false_positive_rate": float(
+            (repo_rows["user_action"] == "false_positive").mean()
+        ) if "user_action" in repo_rows.columns else None,
+        "repo_avg_cvss": float(repo_rows["cvss_score"].mean()) if "cvss_score" in repo_rows.columns else None,
+        "repo_critical_count": int((repo_rows["tier"] == "CRITICAL").sum()),
+        "repo_unique_packages": int(repo_rows["package_name"].nunique()),
+        "repo_unique_cwes": int(repo_rows["primary_cwe"].nunique()) if "primary_cwe" in repo_rows.columns else 0,
+    }
+
+
+def _compute_portfolio_context(result_df: pd.DataFrame, vuln_row: dict) -> dict:
+    """Compute portfolio-level context relative to a specific vulnerability."""
+    ctx = {
+        "total_vulnerabilities": int(len(result_df)),
+        "avg_risk_score": float(result_df["risk_score"].mean()),
+        "critical_count": int((result_df["tier"] == "CRITICAL").sum()),
+        "high_count": int((result_df["tier"] == "HIGH").sum()),
+    }
+    cwe = vuln_row.get("primary_cwe")
+    if cwe and "primary_cwe" in result_df.columns:
+        ctx["same_cwe_count"] = int((result_df["primary_cwe"] == cwe).sum())
+    pkg = vuln_row.get("package_name")
+    if pkg:
+        ctx["same_pkg_count"] = int((result_df["package_name"] == pkg).sum())
+    return ctx
+
+
+@app.get("/api/explain/{cve_id}")
+def explain_vulnerability(cve_id: str):
+    """Generate a structured 3-section LLM explanation for a specific CVE."""
+    if _state["last_results"] is None:
+        raise HTTPException(status_code=404, detail="No results yet. Upload or score data first.")
+
+    result_df = _state["last_results"]
+    mask = result_df["cve_id"].astype(str) == cve_id
+    if mask.sum() == 0:
+        raise HTTPException(status_code=404, detail=f"CVE '{cve_id}' not found.")
+
+    row = result_df[mask].iloc[0].to_dict()
+
+    # Sanitize NaN values in row
+    for k, v in row.items():
+        if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
+            row[k] = None
+
+    # Gather SHAP features
+    shap_features = []
+    feature_imp_file = Path(MODEL_DIR) / "feature_importance.csv"
+    if feature_imp_file.exists():
+        imp_df = pd.read_csv(feature_imp_file)
+        shap_features = [(r["feature"], r["importance"]) for _, r in imp_df.head(10).iterrows()]
+
+    risk_score = float(row.get("risk_score", 0))
+    tier = row.get("tier", "UNKNOWN")
+    repo = row.get("repo", "")
+
+    repo_stats = _compute_repo_stats(result_df, repo) if repo else None
+    portfolio_context = _compute_portfolio_context(result_df, row)
+
+    try:
+        from vuln_insight.llm.bedrock_client import BedrockClient
+        client = BedrockClient()
+        explanation = client.explain_vulnerability(
+            vuln_data=row,
+            shap_features=shap_features,
+            risk_score=risk_score,
+            tier=tier,
+            repo_stats=repo_stats,
+            portfolio_context=portfolio_context,
+        )
+        return {
+            "cve_id": cve_id,
+            "context": explanation.get("context", ""),
+            "impact": explanation.get("impact", ""),
+            "remedy": explanation.get("remedy", ""),
+        }
+    except Exception as e:
+        logger.exception("Bedrock explanation failed for %s", cve_id)
+        raise HTTPException(status_code=500, detail=f"LLM explanation failed: {str(e)}")
+
+
+@app.get("/api/explain/portfolio")
+def explain_portfolio():
+    """Generate a structured 3-section LLM portfolio summary."""
+    if _state["last_results"] is None:
+        raise HTTPException(status_code=404, detail="No results yet. Upload or score data first.")
+
+    result_df = _state["last_results"]
+
+    tier_counts = result_df["tier"].value_counts().to_dict()
+
+    # Top repos
+    repo_agg = (
+        result_df.groupby("repo")
+        .agg(
+            avg_risk=("risk_score", "mean"),
+            cve_count=("cve_id", "count"),
+            critical_count=("tier", lambda x: (x == "CRITICAL").sum()),
+        )
+        .sort_values("avg_risk", ascending=False)
+        .head(10)
+        .reset_index()
+    )
+    if "user_action" in result_df.columns:
+        fix_rates = result_df.groupby("repo")["user_action"].apply(
+            lambda x: (x == "fixed").mean()
+        ).to_dict()
+        repo_agg["fix_rate"] = repo_agg["repo"].map(fix_rates)
+    top_repos = repo_agg.to_dict(orient="records")
+
+    # Top CVEs
+    top_cves = result_df.head(10)[["cve_id", "risk_score", "tier", "package_name", "primary_cwe"]].fillna("").to_dict(orient="records") if "primary_cwe" in result_df.columns else result_df.head(10)[["cve_id", "risk_score", "tier", "package_name"]].fillna("").to_dict(orient="records")
+
+    # CWE patterns
+    cwe_patterns = []
+    if "primary_cwe" in result_df.columns:
+        cwe_agg = result_df.groupby("primary_cwe").agg(
+            count=("cve_id", "count"),
+        ).sort_values("count", ascending=False).head(10).reset_index()
+        if "user_action" in result_df.columns:
+            cwe_fix = result_df.groupby("primary_cwe")["user_action"].apply(
+                lambda x: (x == "fixed").mean()
+            ).to_dict()
+            cwe_agg["fix_rate"] = cwe_agg["primary_cwe"].map(cwe_fix)
+        cwe_patterns = [{"cwe": r["primary_cwe"], "count": int(r["count"]), "fix_rate": r.get("fix_rate")} for _, r in cwe_agg.iterrows()]
+
+    # Package patterns
+    pkg_agg = (
+        result_df.groupby("package_name")
+        .agg(count=("cve_id", "count"), avg_risk=("risk_score", "mean"))
+        .sort_values("count", ascending=False)
+        .head(10)
+        .reset_index()
+    )
+    pkg_patterns = [{"package": r["package_name"], "count": int(r["count"]), "avg_risk": float(r["avg_risk"])} for _, r in pkg_agg.iterrows()]
+
+    summary_data = {
+        "total_vulnerabilities": int(len(result_df)),
+        "avg_risk_score": float(result_df["risk_score"].mean()),
+        "tier_counts": tier_counts,
+        "unique_repos": int(result_df["repo"].nunique()),
+        "unique_packages": int(result_df["package_name"].nunique()),
+        "top_repos": top_repos,
+        "top_cves": top_cves,
+        "cwe_patterns": cwe_patterns,
+        "pkg_patterns": pkg_patterns,
+    }
+
+    try:
+        from vuln_insight.llm.bedrock_client import BedrockClient
+        client = BedrockClient()
+        explanation = client.generate_portfolio_summary(summary_data)
+        return {
+            "context": explanation.get("context", ""),
+            "impact": explanation.get("impact", ""),
+            "remedy": explanation.get("remedy", ""),
+            "summary_stats": {
+                "total_vulnerabilities": summary_data["total_vulnerabilities"],
+                "avg_risk_score": round(summary_data["avg_risk_score"], 4),
+                "tier_counts": tier_counts,
+            },
+        }
+    except Exception as e:
+        logger.exception("Bedrock portfolio explanation failed")
+        raise HTTPException(status_code=500, detail=f"LLM portfolio explanation failed: {str(e)}")
 
 
 if __name__ == "__main__":
