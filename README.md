@@ -51,16 +51,16 @@ cd ai-ml-insight
 
 # 2. Install Python dependencies
 cd ml-pipeline
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # 3. Generate sample data
-python scripts/ingest.py sample -n 1000 -o data/sample_data.csv
+python3 scripts/ingest.py sample -n 1000 -o data/sample_data.csv
 
 # 4. Train the model
-python scripts/train.py --data data/sample_data.csv --no-embeddings --split time
+python3 scripts/train.py --data data/sample_data.csv --no-embeddings --split time
 
 # 5. Start the dashboard API
-python -m vuln_insight.serving.dashboard_api
+python3 -m vuln_insight.serving.dashboard_api
 # API running at http://localhost:8000
 
 # 6. In a new terminal — start the React UI
@@ -92,22 +92,22 @@ docker-compose up --build
 
 ```bash
 cd ml-pipeline
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # Generate sample data
-python scripts/ingest.py sample -n 1000
+python3 scripts/ingest.py sample -n 1000
 
 # Train
-python scripts/train.py --no-embeddings
+python3 scripts/train.py --no-embeddings
 
 # Score new vulnerabilities
-python scripts/predict.py data/sample_data.csv -m models -o results.csv
+python3 scripts/predict.py data/sample_data.csv -m models -o results.csv
 
 # SHAP explanations (no AWS needed)
-python scripts/explain.py shap-only data/sample_data.csv -m models --top-n 10
+python3 scripts/explain.py shap-only data/sample_data.csv -m models --top-n 10
 
 # LLM explanations (requires AWS credentials)
-python scripts/explain.py batch data/sample_data.csv -m models --top-n 5
+python3 scripts/explain.py batch data/sample_data.csv -m models --top-n 5
 ```
 
 ---
@@ -243,35 +243,35 @@ risk_score = 0.45 * ml_prediction
 
 ```bash
 # From CSV
-python scripts/ingest.py csv /path/to/data.csv -o data/ingested.csv
+python3 scripts/ingest.py csv /path/to/data.csv -o data/ingested.csv
 
 # From JSON API response file
-python scripts/ingest.py json /path/to/response.json -o data/ingested.csv
+python3 scripts/ingest.py json /path/to/response.json -o data/ingested.csv
 
 # From MariaDB
-python scripts/ingest.py db -c config/db_config.yaml -o data/ingested.csv
+python3 scripts/ingest.py db -c config/db_config.yaml -o data/ingested.csv
 
 # Generate synthetic data
-python scripts/ingest.py sample -n 1000 -o data/sample_data.csv
+python3 scripts/ingest.py sample -n 1000 -o data/sample_data.csv
 
 # Show dataset info
-python scripts/ingest.py info data/sample_data.csv
+python3 scripts/ingest.py info data/sample_data.csv
 ```
 
 ### Train Model
 
 ```bash
 # Train with sample data (auto-generated)
-python scripts/train.py --no-embeddings
+python3 scripts/train.py --no-embeddings
 
 # Train with your data
-python scripts/train.py --data data/ingested.csv --split time --shap --plots
+python3 scripts/train.py --data data/ingested.csv --split time --shap --plots
 
 # Train with text embeddings (slower but more features)
-python scripts/train.py --data data/ingested.csv --embeddings
+python3 scripts/train.py --data data/ingested.csv --embeddings
 
 # Custom output directory
-python scripts/train.py --data data/ingested.csv -o models/v2
+python3 scripts/train.py --data data/ingested.csv -o models/v2
 ```
 
 **Output**: Model files saved to `models/`:
@@ -285,32 +285,32 @@ python scripts/train.py --data data/ingested.csv -o models/v2
 
 ```bash
 # Score from CSV
-python scripts/predict.py data/new_vulns.csv -m models -o scored_results.csv
+python3 scripts/predict.py data/new_vulns.csv -m models -o scored_results.csv
 
 # Score from JSON
-python scripts/predict.py data/api_response.json -m models --format json
+python3 scripts/predict.py data/api_response.json -m models --format json
 
 # Top 50 riskiest
-python scripts/predict.py data/new_vulns.csv -m models --top-n 50
+python3 scripts/predict.py data/new_vulns.csv -m models --top-n 50
 
 # JSON output
-python scripts/predict.py data/new_vulns.csv -m models -o results.json --json-output
+python3 scripts/predict.py data/new_vulns.csv -m models -o results.json --json-output
 ```
 
 ### Generate Explanations
 
 ```bash
 # SHAP-only explanations (no AWS needed)
-python scripts/explain.py shap-only data/scored.csv -m models --top-n 10
+python3 scripts/explain.py shap-only data/scored.csv -m models --top-n 10
 
 # Single CVE explanation with LLM
-python scripts/explain.py single data/scored.csv --cve-id CVE-2024-1234 -m models
+python3 scripts/explain.py single data/scored.csv --cve-id CVE-2024-1234 -m models
 
 # Batch LLM explanations for top 5
-python scripts/explain.py batch data/scored.csv -m models --top-n 5 -o explanations.json
+python3 scripts/explain.py batch data/scored.csv -m models --top-n 5 -o explanations.json
 
 # Portfolio-level summary
-python scripts/explain.py portfolio data/scored.csv -m models -o summary.txt
+python3 scripts/explain.py portfolio data/scored.csv -m models -o summary.txt
 ```
 
 ---
@@ -430,14 +430,14 @@ database: vuln_db
 ```bash
 # Install dev dependencies
 cd ml-pipeline
-pip install -r requirements.txt
-pip install pytest
+pip3 install -r requirements.txt
+pip3 install pytest
 
 # Run tests
-pytest tests/
+python3 -m pytest tests/
 
 # Start dashboard API in dev mode
-python -m vuln_insight.serving.dashboard_api
+python3 -m vuln_insight.serving.dashboard_api
 
 # Start React UI in dev mode
 cd ../ui
