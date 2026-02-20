@@ -48,12 +48,14 @@ class HybridScorer:
         results["ml_score"] = ml_scores
 
         # Normalized components
+        cvss_col = raw_data_df["cvss_score"] if "cvss_score" in raw_data_df.columns else pd.Series(0, index=raw_data_df.index)
         results["normalized_cvss"] = (
-            pd.to_numeric(raw_data_df.get("cvss_score", 0), errors="coerce")
+            pd.to_numeric(cvss_col, errors="coerce")
             .fillna(0).clip(0, 10) / 10
         )
+        epss_col = raw_data_df["epss_percentile"] if "epss_percentile" in raw_data_df.columns else pd.Series(0, index=raw_data_df.index)
         results["normalized_epss"] = (
-            pd.to_numeric(raw_data_df.get("epss_percentile", 0), errors="coerce")
+            pd.to_numeric(epss_col, errors="coerce")
             .fillna(0).clip(0, 1)
         )
 

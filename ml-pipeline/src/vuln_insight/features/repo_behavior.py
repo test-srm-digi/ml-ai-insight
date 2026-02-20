@@ -7,6 +7,13 @@ import numpy as np
 import pandas as pd
 
 
+def _get_col(df, col_name, default=0):
+    """Safely get a column from a DataFrame, returning a Series with proper index."""
+    if col_name in df.columns:
+        return df[col_name]
+    return pd.Series(default, index=df.index)
+
+
 def extract_repo_features(df: pd.DataFrame) -> pd.DataFrame:
     """Extract ~40 repo behavioral features via groupby aggregates."""
     features = pd.DataFrame(index=df.index)
@@ -63,8 +70,8 @@ def extract_repo_features(df: pd.DataFrame) -> pd.DataFrame:
     features["repo_skip_rate"] = (repo_col.map(skip_count).fillna(0) / repo_col.map(total_per_repo).clip(lower=1)).fillna(0)
 
     # Score aggregates
-    cvss = pd.to_numeric(df.get("cvss_score", 0), errors="coerce").fillna(0)
-    epss = pd.to_numeric(df.get("epss_score", 0), errors="coerce").fillna(0)
+    cvss = pd.to_numeric(_get_col(df, "cvss_score", 0), errors="coerce").fillna(0)
+    epss = pd.to_numeric(_get_col(df, "epss_score", 0), errors="coerce").fillna(0)
     df_scores = pd.DataFrame({"repo": repo_col, "cvss": cvss, "epss": epss})
 
     repo_avg_cvss = df_scores.groupby("repo")["cvss"].mean()
@@ -88,13 +95,13 @@ def extract_repo_features(df: pd.DataFrame) -> pd.DataFrame:
     features["repo_unique_cwes"] = repo_col.map(repo_uniq_cwe).fillna(0).astype(int)
 
     # Patch rate
-    has_patch = pd.to_numeric(df.get("has_patch", 0), errors="coerce").fillna(0)
+    has_patch = pd.to_numeric(_get_col(df, "has_patch", 0), errors="coerce").fillna(0)
     df_patch = pd.DataFrame({"repo": repo_col, "has_patch": has_patch})
     repo_patch_rate = df_patch.groupby("repo")["has_patch"].mean()
     features["repo_has_patch_rate"] = repo_col.map(repo_patch_rate).fillna(0)
 
     # Average transitive deps
-    trans = pd.to_numeric(df.get("transitive_dep_count", 0), errors="coerce").fillna(0)
+    trans = pd.to_numeric(_get_col(df, "transitive_dep_count", 0), errors="coerce").fillna(0)
     df_trans = pd.DataFrame({"repo": repo_col, "trans": trans})
     repo_avg_trans = df_trans.groupby("repo")["trans"].mean()
     features["repo_avg_transitive_deps"] = repo_col.map(repo_avg_trans).fillna(0)

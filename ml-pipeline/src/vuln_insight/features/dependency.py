@@ -44,7 +44,7 @@ def extract_dependency_features(df: pd.DataFrame) -> pd.DataFrame:
     features = pd.DataFrame(index=df.index)
 
     # Dependency depth
-    trans_count = pd.to_numeric(df.get("transitive_dep_count", 0), errors="coerce").fillna(0).astype(int)
+    trans_count = pd.to_numeric(df.get("transitive_dep_count", pd.Series(0, index=df.index)), errors="coerce").fillna(0).astype(int)
     features["dependency_depth"] = trans_count
     features["is_direct_dependency"] = (trans_count == 0).astype(int)
     features["is_transitive_dependency"] = (trans_count > 0).astype(int)
@@ -79,7 +79,7 @@ def extract_dependency_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # Affected ranges
     features["num_affected_ranges"] = pd.to_numeric(
-        df.get("num_affected_ranges", 0), errors="coerce"
+        df.get("num_affected_ranges", pd.Series(0, index=df.index)), errors="coerce"
     ).fillna(0).astype(int)
 
     # Has fix available

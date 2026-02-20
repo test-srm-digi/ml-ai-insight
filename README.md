@@ -42,6 +42,7 @@ A complete ML system for prioritizing software vulnerabilities using XGBoost, 27
 - Node.js 18+ (for the dashboard UI)
 - Java 17+ and Gradle (for the Java API, optional)
 - Docker & Docker Compose (for containerized setup)
+- **macOS only**: `brew install libomp` (required by XGBoost)
 
 ### Option 1: Local Development (Fastest)
 
@@ -52,6 +53,7 @@ cd ai-ml-insight
 # 2. Install Python dependencies
 cd ml-pipeline
 pip3 install -r requirements.txt
+pip3 install -e .
 
 # 3. Generate sample data
 python3 scripts/ingest.py sample -n 1000 -o data/sample_data.csv
@@ -93,6 +95,7 @@ docker-compose up --build
 ```bash
 cd ml-pipeline
 pip3 install -r requirements.txt
+pip3 install -e .
 
 # Generate sample data
 python3 scripts/ingest.py sample -n 1000
@@ -431,6 +434,7 @@ database: vuln_db
 # Install dev dependencies
 cd ml-pipeline
 pip3 install -r requirements.txt
+pip3 install -e .
 pip3 install pytest
 
 # Run tests
