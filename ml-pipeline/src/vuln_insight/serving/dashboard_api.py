@@ -101,6 +101,10 @@ def _score_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         result["primary_cwe"] = canonical.loc[scores_df.index, "primary_cwe"]
     if "user_action" in canonical.columns:
         result["user_action"] = canonical.loc[scores_df.index, "user_action"]
+    if "release" in canonical.columns:
+        result["release"] = canonical.loc[scores_df.index, "release"]
+    if "has_patch" in canonical.columns:
+        result["has_patch"] = canonical.loc[scores_df.index, "has_patch"]
 
     result = result.sort_values("risk_score", ascending=False).reset_index(drop=True)
     return result, canonical
@@ -508,6 +512,303 @@ def explain_vulnerability(cve_id: str):
     except Exception as e:
         logger.exception("Bedrock explanation failed for %s", cve_id)
         raise HTTPException(status_code=500, detail=f"LLM explanation failed: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Release Comparison per Repository
+# ---------------------------------------------------------------------------
+
+@app.get("/api/repos")
+def list_repos():
+    """Return all repos with their releases and summary stats."""
+    if _state["last_results"] is None:
+        raise HTTPException(status_code=404, detail="No results yet.")
+
+    result_df = _state["last_results"]
+    raw_df = _state["last_raw_df"]
+
+    repos_out = []
+    for repo in sorted(result_df["repo"].unique()):
+        repo_rows = result_df[result_df["repo"] == repo]
+
+        releases = []
+        if "release" in repo_rows.columns:
+            for rel_tag in sorted(repo_rows["release"].dropna().unique(), reverse=True):
+                rel_rows = repo_rows[repo_rows["release"] == rel_tag]
+                releases.append({
+                    "release": rel_tag,
+                    "total_vulns": int(len(rel_rows)),
+                    "critical_count": int((rel_rows["tier"] == "CRITICAL").sum()),
+                    "avg_risk": round(float(rel_rows["risk_score"].mean()), 4),
+                })
+
+        repos_out.append({
+            "repo": repo,
+            "total_vulns": int(len(repo_rows)),
+            "critical_count": int((repo_rows["tier"] == "CRITICAL").sum()),
+            "avg_risk": round(float(repo_rows["risk_score"].mean()), 4),
+            "releases": releases,
+        })
+
+    return {"repos": repos_out}
+
+
+def _build_release_stats(rows: pd.DataFrame, release_tag: str, raw_subset: pd.DataFrame) -> dict:
+    """Build detailed stats for a single release slice."""
+    tier_counts = rows["tier"].value_counts().to_dict()
+
+    # Top CVEs
+    top = rows.nlargest(5, "risk_score")
+    top_cves = []
+    for idx in top.index:
+        row_dict = rows.loc[idx].to_dict()
+        entry = {
+            "cve_id": row_dict.get("cve_id", ""),
+            "risk_score": float(row_dict.get("risk_score", 0)),
+            "tier": row_dict.get("tier", ""),
+            "package_name": row_dict.get("package_name", ""),
+        }
+        if "primary_cwe" in rows.columns:
+            entry["primary_cwe"] = row_dict.get("primary_cwe", "")
+        top_cves.append(entry)
+
+    # CWE patterns
+    cwe_patterns = []
+    if "primary_cwe" in rows.columns:
+        cwe_agg = rows.groupby("primary_cwe").agg(count=("cve_id", "count")).sort_values("count", ascending=False).head(5).reset_index()
+        cwe_patterns = [{"cwe": r["primary_cwe"], "count": int(r["count"])} for _, r in cwe_agg.iterrows()]
+
+    # Package patterns
+    pkg_agg = rows.groupby("package_name").agg(
+        count=("cve_id", "count"), avg_risk=("risk_score", "mean")
+    ).sort_values("count", ascending=False).head(5).reset_index()
+    pkg_patterns = [{"package": r["package_name"], "count": int(r["count"]), "avg_risk": float(r["avg_risk"])} for _, r in pkg_agg.iterrows()]
+
+    # Patch and fix rates
+    patch_rate = None
+    if "has_patch" in rows.columns:
+        patch_rate = float(rows["has_patch"].astype(bool).mean())
+    elif "has_patch" in raw_subset.columns:
+        patch_rate = float(raw_subset["has_patch"].astype(bool).mean())
+
+    fix_rate = None
+    if "user_action" in rows.columns:
+        fix_rate = float((rows["user_action"] == "fixed").mean())
+    elif "user_action" in raw_subset.columns:
+        fix_rate = float((raw_subset["user_action"] == "fixed").mean())
+
+    return {
+        "release_tag": release_tag,
+        "total_vulns": int(len(rows)),
+        "avg_risk_score": float(rows["risk_score"].mean()) if len(rows) > 0 else 0,
+        "max_risk_score": float(rows["risk_score"].max()) if len(rows) > 0 else 0,
+        "tier_counts": tier_counts,
+        "unique_packages": int(rows["package_name"].nunique()),
+        "patch_rate": patch_rate,
+        "fix_rate": fix_rate,
+        "top_cves": top_cves,
+        "cwe_patterns": cwe_patterns,
+        "pkg_patterns": pkg_patterns,
+    }
+
+
+@app.get("/api/explain/release-comparison/{repo}")
+def explain_release_comparison(
+    repo: str,
+    current_release: str = Query(default=None, description="Current release tag"),
+    previous_release: str = Query(default=None, description="Previous release tag to compare against"),
+):
+    """Generate a structured 3-section LLM release comparison for a repository."""
+    if _state["last_results"] is None:
+        raise HTTPException(status_code=404, detail="No results yet. Upload or score data first.")
+
+    result_df = _state["last_results"]
+    raw_df = _state["last_raw_df"]
+
+    # Filter to this repo
+    repo_mask = result_df["repo"] == repo
+    if repo_mask.sum() == 0:
+        raise HTTPException(status_code=404, detail=f"Repository '{repo}' not found.")
+
+    repo_results = result_df[repo_mask].copy()
+
+    if "release" not in repo_results.columns or repo_results["release"].isna().all():
+        raise HTTPException(status_code=400, detail=f"No release data available for repository '{repo}'.")
+
+    available_releases = sorted(repo_results["release"].dropna().unique())
+    if len(available_releases) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Need at least 2 releases to compare. Repository '{repo}' has {len(available_releases)} release(s).",
+        )
+
+    # Default: latest two releases
+    if not current_release:
+        current_release = available_releases[-1]
+    if not previous_release:
+        idx = available_releases.index(current_release) if current_release in available_releases else len(available_releases) - 1
+        previous_release = available_releases[max(0, idx - 1)]
+
+    if current_release not in available_releases:
+        raise HTTPException(status_code=404, detail=f"Release '{current_release}' not found for repo '{repo}'. Available: {available_releases}")
+    if previous_release not in available_releases:
+        raise HTTPException(status_code=404, detail=f"Release '{previous_release}' not found for repo '{repo}'. Available: {available_releases}")
+
+    # Split data
+    curr_rows = repo_results[repo_results["release"] == current_release]
+    prev_rows = repo_results[repo_results["release"] == previous_release]
+
+    # Raw subsets for patch info
+    raw_repo = raw_df[raw_df["repo"] == repo] if raw_df is not None else pd.DataFrame()
+    raw_curr = raw_repo[raw_repo["release"] == current_release] if "release" in raw_repo.columns else pd.DataFrame()
+    raw_prev = raw_repo[raw_repo["release"] == previous_release] if "release" in raw_repo.columns else pd.DataFrame()
+
+    current_stats = _build_release_stats(curr_rows, current_release, raw_curr)
+    previous_stats = _build_release_stats(prev_rows, previous_release, raw_prev)
+
+    # Compute deltas
+    vuln_change = current_stats["total_vulns"] - previous_stats["total_vulns"]
+    prev_total = previous_stats["total_vulns"] or 1
+    avg_risk_change = current_stats["avg_risk_score"] - previous_stats["avg_risk_score"]
+    critical_change = current_stats["tier_counts"].get("CRITICAL", 0) - previous_stats["tier_counts"].get("CRITICAL", 0)
+    high_change = current_stats["tier_counts"].get("HIGH", 0) - previous_stats["tier_counts"].get("HIGH", 0)
+    patch_rate_change = None
+    if current_stats["patch_rate"] is not None and previous_stats["patch_rate"] is not None:
+        patch_rate_change = current_stats["patch_rate"] - previous_stats["patch_rate"]
+
+    # New / resolved CVEs
+    curr_cve_ids = set(curr_rows["cve_id"].tolist())
+    prev_cve_ids = set(prev_rows["cve_id"].tolist())
+    new_cve_ids = curr_cve_ids - prev_cve_ids
+    resolved_cve_ids = prev_cve_ids - curr_cve_ids
+
+    new_cves = curr_rows[curr_rows["cve_id"].isin(new_cve_ids)].sort_values("risk_score", ascending=False).head(10)
+    resolved_cves = prev_rows[prev_rows["cve_id"].isin(resolved_cve_ids)].sort_values("risk_score", ascending=False).head(10)
+
+    def _rows_to_cve_list(df):
+        out = []
+        for _, r in df.iterrows():
+            entry = {
+                "cve_id": r.get("cve_id", ""),
+                "risk_score": float(r.get("risk_score", 0)),
+                "tier": r.get("tier", ""),
+                "package_name": r.get("package_name", ""),
+            }
+            out.append(entry)
+        return out
+
+    # New / resolved CWEs
+    curr_cwes = set(curr_rows["primary_cwe"].dropna().unique()) if "primary_cwe" in curr_rows.columns else set()
+    prev_cwes = set(prev_rows["primary_cwe"].dropna().unique()) if "primary_cwe" in prev_rows.columns else set()
+
+    delta = {
+        "vuln_count_change": vuln_change,
+        "vuln_count_change_pct": vuln_change / prev_total if prev_total else 0,
+        "avg_risk_change": avg_risk_change,
+        "critical_change": critical_change,
+        "high_change": high_change,
+        "patch_rate_change": patch_rate_change,
+        "new_cves": _rows_to_cve_list(new_cves),
+        "resolved_cves": _rows_to_cve_list(resolved_cves),
+        "new_cwes": sorted(curr_cwes - prev_cwes),
+        "resolved_cwes": sorted(prev_cwes - curr_cwes),
+    }
+
+    comparison_data = {
+        "repo": repo,
+        "current_release": current_stats,
+        "previous_release": previous_stats,
+        "delta": delta,
+    }
+
+    # Return comparison stats + LLM analysis
+    try:
+        from vuln_insight.llm.bedrock_client import BedrockClient
+        client = BedrockClient()
+        explanation = client.generate_release_comparison(comparison_data)
+        return {
+            "repo": repo,
+            "current_release": current_stats,
+            "previous_release": previous_stats,
+            "delta": {
+                "vuln_count_change": vuln_change,
+                "avg_risk_change": round(avg_risk_change, 4),
+                "critical_change": critical_change,
+                "high_change": high_change,
+                "new_cve_count": len(new_cve_ids),
+                "resolved_cve_count": len(resolved_cve_ids),
+                "new_cves": _rows_to_cve_list(new_cves),
+                "resolved_cves": _rows_to_cve_list(resolved_cves),
+            },
+            "context": explanation.get("context", ""),
+            "impact": explanation.get("impact", ""),
+            "remedy": explanation.get("remedy", ""),
+        }
+    except Exception as e:
+        logger.exception("Bedrock release comparison failed for %s", repo)
+        raise HTTPException(status_code=500, detail=f"LLM release comparison failed: {str(e)}")
+
+
+@app.get("/api/release-comparison/{repo}/stats")
+def release_comparison_stats(
+    repo: str,
+    current_release: str = Query(default=None),
+    previous_release: str = Query(default=None),
+):
+    """Return release comparison stats without LLM analysis (fast, no Bedrock call)."""
+    if _state["last_results"] is None:
+        raise HTTPException(status_code=404, detail="No results yet.")
+
+    result_df = _state["last_results"]
+    raw_df = _state["last_raw_df"]
+
+    repo_mask = result_df["repo"] == repo
+    if repo_mask.sum() == 0:
+        raise HTTPException(status_code=404, detail=f"Repository '{repo}' not found.")
+
+    repo_results = result_df[repo_mask].copy()
+
+    if "release" not in repo_results.columns or repo_results["release"].isna().all():
+        raise HTTPException(status_code=400, detail=f"No release data for '{repo}'.")
+
+
+    available_releases = sorted(repo_results["release"].dropna().unique())
+    if len(available_releases) < 2:
+        raise HTTPException(status_code=400, detail=f"Need at least 2 releases. Found: {len(available_releases)}.")
+
+    if not current_release:
+        current_release = available_releases[-1]
+    if not previous_release:
+        idx = available_releases.index(current_release) if current_release in available_releases else len(available_releases) - 1
+        previous_release = available_releases[max(0, idx - 1)]
+
+    curr_rows = repo_results[repo_results["release"] == current_release]
+    prev_rows = repo_results[repo_results["release"] == previous_release]
+
+    raw_repo = raw_df[raw_df["repo"] == repo] if raw_df is not None else pd.DataFrame()
+    raw_curr = raw_repo[raw_repo["release"] == current_release] if "release" in raw_repo.columns else pd.DataFrame()
+    raw_prev = raw_repo[raw_repo["release"] == previous_release] if "release" in raw_repo.columns else pd.DataFrame()
+
+    current_stats = _build_release_stats(curr_rows, current_release, raw_curr)
+    previous_stats = _build_release_stats(prev_rows, previous_release, raw_prev)
+
+    curr_cve_ids = set(curr_rows["cve_id"].tolist())
+    prev_cve_ids = set(prev_rows["cve_id"].tolist())
+
+    return {
+        "repo": repo,
+        "available_releases": available_releases,
+        "current_release": current_stats,
+        "previous_release": previous_stats,
+        "delta": {
+            "vuln_count_change": current_stats["total_vulns"] - previous_stats["total_vulns"],
+            "avg_risk_change": round(current_stats["avg_risk_score"] - previous_stats["avg_risk_score"], 4),
+            "critical_change": current_stats["tier_counts"].get("CRITICAL", 0) - previous_stats["tier_counts"].get("CRITICAL", 0),
+            "high_change": current_stats["tier_counts"].get("HIGH", 0) - previous_stats["tier_counts"].get("HIGH", 0),
+            "new_cve_count": len(curr_cve_ids - prev_cve_ids),
+            "resolved_cve_count": len(prev_cve_ids - curr_cve_ids),
+        },
+    }
 
 
 if __name__ == "__main__":
