@@ -63,3 +63,26 @@ export async function getPortfolioInsights() {
   const res = await api.get('/api/explain/portfolio');
   return res.data;
 }
+
+export async function getRepos() {
+  const res = await api.get('/api/repos');
+  return res.data;
+}
+
+export async function getReleaseComparisonStats(repo, currentRelease, previousRelease) {
+  const params = new URLSearchParams();
+  if (currentRelease) params.append('current_release', currentRelease);
+  if (previousRelease) params.append('previous_release', previousRelease);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const res = await api.get(`/api/release-comparison/${encodeURIComponent(repo)}/stats${query}`);
+  return res.data;
+}
+
+export async function getReleaseComparisonInsights(repo, currentRelease, previousRelease) {
+  const params = new URLSearchParams();
+  if (currentRelease) params.append('current_release', currentRelease);
+  if (previousRelease) params.append('previous_release', previousRelease);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const res = await api.get(`/api/explain/release-comparison/${encodeURIComponent(repo)}${query}`);
+  return res.data;
+}

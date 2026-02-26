@@ -4,6 +4,28 @@
 
 ---
 
+## Table of Contents
+
+| # | Section | Description |
+|---|---------|-------------|
+| 1 | [What Problem Are We Solving?](#1-what-problem-are-we-solving) | The vulnerability triage challenge and why manual approaches fail |
+| 2 | [System Architecture](#2-system-architecture) | End-to-end architecture diagram from data sources to dashboard |
+| 3 | [The ML Model](#3-the-ml-model) | XGBoost algorithm choice, training process, and hyperparameters |
+| 4 | [Feature Engineering](#4-feature-engineering-what-the-model-sees) | All 7 feature blocks (129+ features) that power the model |
+| 5 | [The Hybrid Risk Score](#5-the-hybrid-risk-score) | How ML, CVSS, EPSS, and business rules combine into a single score |
+| 6 | [Model Explainability (SHAP)](#6-model-explainability-shap) | Per-prediction explanations and top feature importances |
+| 7 | [Data Pipeline: End-to-End Flow](#7-data-pipeline-end-to-end-flow) | Ingestion, normalization, labeling, feature engineering, training, scoring |
+| 8 | [Current Model Performance](#8-current-model-performance) | AUC, precision, recall, F1 metrics and why they'll improve with real data |
+| 9 | [LLM Explanation Layer (AWS Bedrock)](#9-llm-explanation-layer-aws-bedrock) | Prompt templates, credential loading, 3-section response format |
+| 10 | [Dashboard UI](#10-dashboard-ui) | React components, AI insights, release comparison, API endpoints |
+| 11 | [Technology Stack Summary](#11-technology-stack-summary) | Full stack: XGBoost, FastAPI, React, Bedrock, Docker |
+| 12 | [What Makes This Different from Just Using CVSS?](#12-what-makes-this-different-from-just-using-cvss) | Side-by-side comparison with a concrete example |
+| 13 | [Why ML & LLM? Why Not Just Build APIs Over the Database?](#13-why-ml--llm-why-not-just-build-apis-over-the-database) | The case for intelligence layers over raw data retrieval |
+| 14 | [Future Enhancements](#14-future-enhancements) | Roadmap: real data, continuous learning, CISA KEV, drift detection |
+| 15 | [How to Run It](#15-how-to-run-it) | Quick-start commands to install, train, and launch |
+
+---
+
 ## 1. What Problem Are We Solving?
 
 Security teams are overwhelmed by vulnerability alerts. A typical enterprise application portfolio generates thousands of CVEs (Common Vulnerabilities and Exposures) per month. The vast majority are noise -- low-risk findings that don't need immediate attention. But buried in that noise are the ones that **actually matter**.
@@ -535,7 +557,48 @@ There are 3 prompt templates, each producing the same 3-section output format:
 - What should be the remediation priority order?
 ```
 
-#### 3. ML Pattern Analysis Prompt (`build_pattern_analysis_prompt`)
+#### 3. Release Comparison Prompt (`build_release_comparison_prompt`)
+
+**When used**: Dashboard "Release Comparison" tab per repository, comparing two releases
+
+**Data injected into prompt**:
+- Repository name and the two release tags being compared (current vs previous)
+- Per-release stats: total vulnerability count, average risk score, tier breakdown (CRITICAL/HIGH/MEDIUM/LOW), CWE patterns with counts, most affected packages, patch rate, fix rate
+- Delta summary: vulnerability count change, average risk change, critical/high tier changes, new CVE count, resolved CVE count
+- New CVEs: list of CVEs introduced in the current release (CVE ID, severity, risk score, package, CWE)
+- Resolved CVEs: list of CVEs present in previous release but absent in current (CVE ID, severity, risk score, package)
+- CWE drift: which weakness types are emerging vs receding between releases
+
+**System prompt**: `"You are a senior security analyst AI. Analyse the following release-over-release vulnerability data for a single repository and provide a structured comparison assessment."`
+
+**Response instructions given to the LLM**:
+
+```
+## I. Context-Awareness & Summarisation
+- How has the security posture changed between these two releases?
+- Is the vulnerability count increasing or decreasing? Is severity shifting?
+- Are new CWE types emerging that weren't present in the previous release?
+- Which packages are driving the changes?
+- Is the overall risk trajectory improving or worsening?
+
+## II. Impact, Health & Blast Radius
+- How many CRITICAL/HIGH vulnerabilities were introduced vs resolved?
+- What is the delta in average risk score? What does it mean?
+- Are there newly introduced CVEs with high EPSS or known exploits?
+- What CWE patterns are concentrating? Is there a systemic weakness developing?
+- What is the patch rate trend? Are patches being applied between releases?
+
+## III. Remedy & Actionable Plans
+- What are the top newly introduced CVEs that need immediate attention?
+- Are there "quick wins" -- new CVEs with available patches that can be fixed easily?
+- What packages should be prioritised for upgrade between releases?
+- Are there CWE-class level mitigations that would address multiple new CVEs?
+- What should the team focus on before the next release?
+```
+
+**Key constraint**: `"Be specific about which CVEs, packages, and CWE types drive each observation. Cite numbers from the data. Do not speculate beyond what the data shows."`
+
+#### 4. ML Pattern Analysis Prompt (`build_pattern_analysis_prompt`)
 
 **When used**: CLI `explain.py` for model introspection
 
@@ -575,6 +638,7 @@ A React-based dashboard provides visual access to all scoring results and AI-pow
 | **CVE Detail Modal** | Click any CVE to see full detail + SHAP feature importance + AI analysis |
 | **AI Analysis (per-CVE)** | "Get AI Analysis" button in any CVE detail modal triggers a Bedrock call and displays a structured 3-section explanation (Context / Impact / Remedy) |
 | **AI Insights Tab** | Dedicated portfolio-level tab that generates an AI risk summary covering security posture, blast radius, and prioritised remediation actions |
+| **Release Comparison Tab** | Per-repository release-over-release comparison. Select a repo and two releases to see side-by-side stats (tier breakdown, avg risk, new/resolved CVEs), a delta summary card, and AI-powered release comparison analysis |
 
 ### AI Components
 
@@ -582,6 +646,7 @@ A React-based dashboard provides visual access to all scoring results and AI-pow
 |----------------|------|---------|
 | `AiInsights` | `ui/src/components/AiInsights.js` | Reusable 3-section tabbed display (I. Context & Summary, II. Impact & Blast Radius, III. Remedy & Action Plan). Handles loading spinner, error with retry, and markdown-style rendering (bullet points, bold text). |
 | `PortfolioInsights` | `ui/src/components/PortfolioInsights.js` | Portfolio-level AI analysis page. Shows summary stat cards (total vulns, avg risk, critical/high counts) and uses `AiInsights` for the LLM response. |
+| `ReleaseComparison` | `ui/src/components/ReleaseComparison.js` | Release-over-release comparison per repository. Dropdown selectors for repo and release pair (auto-defaults to two most recent releases). Shows side-by-side comparison cards (Current Release ⇄ Delta ⇄ Previous Release) with tier breakdowns, top new/resolved CVE tables, and a "Generate Release Comparison AI Insight" button that calls the Bedrock endpoint and renders the 3-section AI analysis via `AiInsights`. |
 | `VulnDetail` | `ui/src/components/VulnDetail.js` | CVE detail modal with risk breakdown, SHAP features, and a "Get AI Analysis" button that calls the per-CVE Bedrock endpoint and displays results via `AiInsights`. |
 
 ### Dashboard API Endpoints
@@ -599,6 +664,9 @@ The Python FastAPI backend (port 8000) serves both the dashboard data and AI exp
 | GET | `/api/vulnerability/{cve_id}` | Vulnerability detail with SHAP features |
 | GET | `/api/explain/portfolio` | AI-generated 3-section portfolio risk summary |
 | GET | `/api/explain/{cve_id}` | AI-generated 3-section explanation for a single CVE |
+| GET | `/api/repos` | All repos with their releases, per-release summary stats (vuln count, critical count, avg risk) |
+| GET | `/api/release-comparison/{repo}/stats` | Fast stats-only comparison between two releases (no LLM). Returns current/previous release stats and delta |
+| GET | `/api/explain/release-comparison/{repo}` | AI-powered release comparison via Bedrock LLM. Returns stats + delta + 3-section context/impact/remedy |
 
 ### Tech Stack
 
@@ -655,7 +723,123 @@ VulnInsight:         Risk Score 0.87 -> CRITICAL
 
 ---
 
-## 13. Future Enhancements
+## 13. Why ML & LLM? Why Not Just Build APIs Over the Database?
+
+This is the most important architectural question. If we already have vulnerability data in MariaDB (or CSV, or JSON feeds), why can't we just write SQL queries and REST endpoints to power the dashboard? Why bring in XGBoost, SHAP, sentence-transformers, and AWS Bedrock?
+
+The short answer: **traditional APIs give you data retrieval; ML + LLM give you intelligence, prediction, and contextual reasoning that no SQL query or business rule can replicate.**
+
+### What Traditional Database APIs Can Do
+
+If we only built SQL-based APIs, we could:
+
+| Capability | SQL/API Approach |
+|-----------|-----------------|
+| List all CVEs by severity | `SELECT * FROM cves WHERE severity = 'CRITICAL' ORDER BY cvss_score DESC` |
+| Count CVEs per repo | `SELECT repo, COUNT(*) FROM cves GROUP BY repo` |
+| Filter by CVSS threshold | `WHERE cvss_score >= 7.0` |
+| Show patch availability | `WHERE has_patch = 1` |
+| Compare release counts | `SELECT release, COUNT(*) FROM cves WHERE repo = ? GROUP BY release` |
+
+This is basic **data retrieval** -- it shows what's in the database, nothing more.
+
+### What Traditional APIs CANNOT Do
+
+| Limitation | Why It Matters |
+|-----------|----------------|
+| **Cannot predict which CVEs your team will actually fix** | Historical user behavior patterns (which CWE types get fixed, which packages get patched, which repos are well-maintained) require ML to learn and apply. No SQL query encodes "teams that fix SQL injection 95% of the time will likely fix this one too." |
+| **Cannot learn non-linear feature interactions** | A CVE that is MEDIUM severity + high EPSS + network-exploitable + no auth + in a production repo = actually CRITICAL. This is a complex multi-dimensional decision that the ML model learns from 129+ signals interacting together. Writing `IF-THEN-ELSE` rules for all combinations is impossible and brittle. |
+| **Cannot generate a risk score that adapts to your organisation** | CVSS is a one-size-fits-all score. Two companies with the same CVE should have different priorities because their repos, teams, tech stacks, and risk appetites differ. The ML model learns YOUR team's decision patterns and produces scores tailored to your context. |
+| **Cannot explain WHY a vulnerability matters** | SQL can tell you "CVSS is 7.5." It cannot say "This CVE matters because the EPSS/CVSS ratio is 3x normal, your team fixes this CWE type 95% of the time, it's in a direct production dependency, and similar CVEs were exploited within 7 days." That requires SHAP + LLM. |
+| **Cannot synthesise cross-cutting insights** | "Your portfolio has a systemic SQL injection problem concentrated in 3 repos, driven by an outdated ORM dependency" is not a SQL query. It requires pattern recognition across repos, packages, CWE types, and temporal trends -- then natural language generation to communicate it. |
+| **Cannot reason about release-over-release trends** | Comparing two releases isn't just "count the CVEs." It's "are the NEW vulnerabilities more severe? Is a new CWE category emerging? Does the delta in patch rate signal a process regression?" This contextual reasoning requires LLM analysis. |
+
+### The ML Layer: What It Adds
+
+```
+                    What SQL gives you              What ML adds
+                    ==================              ============
+ Data:              Raw rows from database    →     Scored, ranked, tiered results
+ Ranking:           ORDER BY cvss_score       →     129-feature risk model that learns
+                                                    from your team's historical decisions
+ Priority:          Static severity buckets   →     Dynamic risk tiers calibrated to
+                                                    your organisation's fix patterns
+ Explainability:    (none)                    →     SHAP values showing WHY each CVE
+                                                    was ranked where it was
+ Adaptation:        (none)                    →     Model improves as more fix/skip
+                                                    decisions are collected
+ Cold start:        (none)                    →     Hybrid scoring ensures new CVE types
+                                                    still get reasonable scores via
+                                                    CVSS/EPSS fallback
+```
+
+### The LLM Layer: What It Adds on Top of ML
+
+The ML model outputs numbers (risk scores, tiers, SHAP values). The LLM converts those numbers into **actionable human intelligence**:
+
+| ML Output | LLM Transformation |
+|-----------|-------------------|
+| `risk_score: 0.87, tier: CRITICAL` | "This CVE is ranked CRITICAL because the ML model detected a significant divergence between EPSS exploit probability (0.92) and CVSS severity (7.5). The model elevated it because your team has historically fixed 95% of SQL injection CVEs in this repo." |
+| `delta: {vuln_count: +12, critical: +3}` | "Release v2.1.0 introduced 12 new vulnerabilities, 3 of which are CRITICAL. This is a significant regression compared to v2.0.0 and is primarily driven by new transitive dependencies in the `spring-security` package. Recommend blocking the release until the 3 critical CVEs are patched." |
+| `portfolio: {avg_risk: 0.62, top_cwe: CWE-79}` | "Your portfolio has an above-average risk posture (0.62 avg, MEDIUM-HIGH). XSS vulnerabilities (CWE-79) account for 23% of all findings across 7 repos, suggesting a systemic input validation gap. A single investment in a shared sanitisation library could neutralise 40+ CVEs." |
+
+### The Architecture Layers Working Together
+
+```
+Layer 1: DATABASE (Data Storage)
+  → "Here are 500 CVEs with their CVSS scores and metadata"
+  → Value: Data availability ✓
+  → Missing: Intelligence ✗
+
+Layer 2: ML MODEL (Pattern Recognition + Scoring)
+  → "Here are those 500 CVEs ranked by a 129-feature risk model that
+     learned from your team's past decisions, with SHAP explanations"
+  → Value: Data availability ✓, Intelligent ranking ✓, Explainability ✓
+  → Missing: Human-readable synthesis ✗
+
+Layer 3: LLM (Contextual Reasoning + Communication)
+  → "Here are those 500 CVEs with risk scores + a natural language
+     brief: what matters most, why, what to do first, and how this
+     release compares to the last one"
+  → Value: Data ✓, Intelligence ✓, Explainability ✓, Actionability ✓
+```
+
+### Real-World Example: Same Data, Three Approaches
+
+**Scenario**: Security team receives 500 new CVEs this week for 10 repositories.
+
+**Approach 1: SQL APIs only**
+- Dashboard shows 500 CVEs sorted by CVSS
+- 47 are CRITICAL (CVSS >= 9.0), 120 are HIGH (7.0-8.9)
+- Team starts at the top and works down -- estimated 3 days of triage
+- They miss a MEDIUM CVE (CVSS 6.5) that has EPSS 0.95 and is being actively exploited
+
+**Approach 2: SQL APIs + ML Scoring**
+- Dashboard shows 500 CVEs ranked by hybrid risk score
+- Only 18 are tier CRITICAL (risk > 0.80) -- the model filtered out noise
+- The MEDIUM/CVSS-6.5 CVE is ranked #3 because EPSS, user behavior, and CWE patterns all signal high risk
+- Team triages 18 critical items in 2 hours, not 3 days
+- SHAP shows exactly why each was flagged
+
+**Approach 3: SQL APIs + ML Scoring + LLM (our approach)**
+- Everything from Approach 2, PLUS:
+- Portfolio AI brief: "Critical risk is concentrated in `auth-service` and `payment-gateway`. Both share a vulnerable `jsonwebtoken` dependency -- upgrading to v9.0.2 in both repos resolves 14 CVEs in one action."
+- Release comparison: "Release v3.2.0 of `search-service` introduced 8 new CVEs, 2 CRITICAL. This is a regression from v3.1.0 which had resolved 5 CVEs. The regression is driven by a new `elasticsearch-client` dependency."
+- Per-CVE analysis: "CVE-2024-12345 is scored CRITICAL despite MEDIUM CVSS because EPSS is 3x higher than expected, this CWE type is fixed 95% of the time by this team, and the package is a direct production dependency."
+
+### Summary: Three Layers, Three Distinct Value Propositions
+
+| Layer | Question It Answers | Cannot Be Replaced By |
+|-------|--------------------|-----------------------|
+| **Database + APIs** | "What vulnerabilities exist?" | -- (foundation) |
+| **ML Model** | "Which ones actually matter for MY team?" | SQL queries, static rules, CVSS thresholds |
+| **LLM** | "Why do they matter and what should I do?" | Template strings, canned reports, dashboards |
+
+The database is necessary but not sufficient. The ML model adds intelligence that adapts to your team. The LLM adds communication that turns data into decisions. Each layer builds on the one below it -- removing any one collapses the value of the layers above.
+
+---
+
+## 14. Future Enhancements
 
 1. **Real data training** -- Connect to actual vulnerability management data for dramatically better model accuracy
 2. **Continuous learning** -- Retrain periodically as new fix/skip decisions are made
@@ -666,7 +850,7 @@ VulnInsight:         Risk Score 0.87 -> CRITICAL
 
 ---
 
-## 14. How to Run It
+## 15. How to Run It
 
 ```bash
 # Install

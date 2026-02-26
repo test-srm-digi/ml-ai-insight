@@ -107,6 +107,17 @@ class BedrockClient:
         raw = self.invoke(prompt, max_tokens=3000)
         return _parse_structured_response(raw)
 
+    def generate_release_comparison(self, comparison_data: dict) -> dict:
+        """Generate a release-over-release comparison analysis for a repository.
+
+        Returns dict with keys: context, impact, remedy.
+        """
+        from vuln_insight.llm.prompt_templates import build_release_comparison_prompt
+
+        prompt = build_release_comparison_prompt(comparison_data)
+        raw = self.invoke(prompt, max_tokens=3000)
+        return _parse_structured_response(raw)
+
 
 def _parse_structured_response(raw_text: str) -> dict:
     """Parse LLM response into context/impact/remedy sections."""
