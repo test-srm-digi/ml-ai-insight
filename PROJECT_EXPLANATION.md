@@ -4,6 +4,28 @@
 
 ---
 
+## Table of Contents
+
+| # | Section | Description |
+|---|---------|-------------|
+| 1 | [What Problem Are We Solving?](#1-what-problem-are-we-solving) | The vulnerability triage challenge and why manual approaches fail |
+| 2 | [System Architecture](#2-system-architecture) | End-to-end architecture diagram from data sources to dashboard |
+| 3 | [The ML Model](#3-the-ml-model) | XGBoost algorithm choice, training process, and hyperparameters |
+| 4 | [Feature Engineering](#4-feature-engineering-what-the-model-sees) | All 7 feature blocks (129+ features) that power the model |
+| 5 | [The Hybrid Risk Score](#5-the-hybrid-risk-score) | How ML, CVSS, EPSS, and business rules combine into a single score |
+| 6 | [Model Explainability (SHAP)](#6-model-explainability-shap) | Per-prediction explanations and top feature importances |
+| 7 | [Data Pipeline: End-to-End Flow](#7-data-pipeline-end-to-end-flow) | Ingestion, normalization, labeling, feature engineering, training, scoring |
+| 8 | [Current Model Performance](#8-current-model-performance) | AUC, precision, recall, F1 metrics and why they'll improve with real data |
+| 9 | [LLM Explanation Layer (AWS Bedrock)](#9-llm-explanation-layer-aws-bedrock) | Prompt templates, credential loading, 3-section response format |
+| 10 | [Dashboard UI](#10-dashboard-ui) | React components, AI insights, release comparison, API endpoints |
+| 11 | [Technology Stack Summary](#11-technology-stack-summary) | Full stack: XGBoost, FastAPI, React, Bedrock, Docker |
+| 12 | [What Makes This Different from Just Using CVSS?](#12-what-makes-this-different-from-just-using-cvss) | Side-by-side comparison with a concrete example |
+| 13 | [Why ML & LLM? Why Not Just Build APIs Over the Database?](#13-why-ml--llm-why-not-just-build-apis-over-the-database) | The case for intelligence layers over raw data retrieval |
+| 14 | [Future Enhancements](#14-future-enhancements) | Roadmap: real data, continuous learning, CISA KEV, drift detection |
+| 15 | [How to Run It](#15-how-to-run-it) | Quick-start commands to install, train, and launch |
+
+---
+
 ## 1. What Problem Are We Solving?
 
 Security teams are overwhelmed by vulnerability alerts. A typical enterprise application portfolio generates thousands of CVEs (Common Vulnerabilities and Exposures) per month. The vast majority are noise -- low-risk findings that don't need immediate attention. But buried in that noise are the ones that **actually matter**.
