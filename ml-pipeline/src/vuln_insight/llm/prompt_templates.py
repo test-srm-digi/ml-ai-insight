@@ -232,6 +232,119 @@ Provide prioritised actions:
 Keep each section concise (4-8 bullet points). Use specific numbers from the data. Do not invent data not provided above."""
 
 
+def build_release_comparison_prompt(comparison_data: dict) -> str:
+    """Build a prompt for per-repository release-over-release comparison analysis."""
+    repo = comparison_data.get("repo", "N/A")
+    current = comparison_data.get("current_release", {})
+    previous = comparison_data.get("previous_release", {})
+
+    def _release_block(label: str, rel: dict) -> str:
+        top_cves = rel.get("top_cves", [])
+        cves_text = "\n".join(
+            f"    - {c['cve_id']}: score {c['risk_score']:.3f} ({c['tier']}), "
+            f"pkg: {c.get('package_name', '?')}, CWE: {c.get('primary_cwe', '?')}"
+            for c in top_cves
+        ) if top_cves else "    No CVE data."
+
+        cwe_text = "\n".join(
+            f"    - {c['cwe']}: {c['count']} occurrences"
+            for c in rel.get("cwe_patterns", [])
+        ) if rel.get("cwe_patterns") else "    No CWE data."
+
+        pkg_text = "\n".join(
+            f"    - {p['package']}: {p['count']} CVEs, avg risk {_fmt_float(p.get('avg_risk'))}"
+            for p in rel.get("pkg_patterns", [])
+        ) if rel.get("pkg_patterns") else "    No package data."
+
+        return f"""
+  ### {label}: {rel.get('release_tag', 'N/A')}
+  - Total Vulnerabilities: {rel.get('total_vulns', 0)}
+  - Average Risk Score: {_fmt_float(rel.get('avg_risk_score'))}
+  - Max Risk Score: {_fmt_float(rel.get('max_risk_score'))}
+  - Tier Distribution:
+    - CRITICAL: {rel.get('tier_counts', {}).get('CRITICAL', 0)}
+    - HIGH: {rel.get('tier_counts', {}).get('HIGH', 0)}
+    - MEDIUM: {rel.get('tier_counts', {}).get('MEDIUM', 0)}
+    - LOW: {rel.get('tier_counts', {}).get('LOW', 0)}
+  - Patch Availability Rate: {_fmt_pct(rel.get('patch_rate'))}
+  - Fix Rate (user actions): {_fmt_pct(rel.get('fix_rate'))}
+  - Unique Packages Affected: {rel.get('unique_packages', 0)}
+  - Top CVEs:
+{cves_text}
+  - CWE Patterns:
+{cwe_text}
+  - Most Affected Packages:
+{pkg_text}"""
+
+    current_block = _release_block("Current Release", current)
+    previous_block = _release_block("Previous Release", previous)
+
+    # Deltas
+    delta = comparison_data.get("delta", {})
+    new_cves = delta.get("new_cves", [])
+    resolved_cves = delta.get("resolved_cves", [])
+    new_cves_text = "\n".join(
+        f"  - {c['cve_id']}: score {c['risk_score']:.3f} ({c['tier']}), pkg: {c.get('package_name', '?')}"
+        for c in new_cves[:10]
+    ) if new_cves else "  None"
+    resolved_cves_text = "\n".join(
+        f"  - {c['cve_id']}: was score {c['risk_score']:.3f} ({c['tier']}), pkg: {c.get('package_name', '?')}"
+        for c in resolved_cves[:10]
+    ) if resolved_cves else "  None"
+
+    return f"""You are a senior security analyst AI. Analyse the following release-over-release vulnerability comparison for repository **{repo}** and provide a structured risk assessment.
+
+## Repository: {repo}
+{current_block}
+{previous_block}
+
+## Release-over-Release Deltas
+- Vulnerability Count Change: {delta.get('vuln_count_change', 0):+d} ({_fmt_pct(delta.get('vuln_count_change_pct'))} change)
+- Avg Risk Score Change: {_fmt_float(delta.get('avg_risk_change'))} (was {_fmt_float(previous.get('avg_risk_score'))}, now {_fmt_float(current.get('avg_risk_score'))})
+- CRITICAL Count Change: {delta.get('critical_change', 0):+d}
+- HIGH Count Change: {delta.get('high_change', 0):+d}
+- Patch Rate Change: {_fmt_pct(delta.get('patch_rate_change'))}
+- New Vulnerabilities Introduced: {len(new_cves)}
+{new_cves_text}
+- Vulnerabilities Resolved: {len(resolved_cves)}
+{resolved_cves_text}
+- New CWE Types Introduced: {', '.join(delta.get('new_cwes', [])) or 'None'}
+- CWE Types Resolved: {', '.join(delta.get('resolved_cwes', [])) or 'None'}
+
+---
+
+Respond in EXACTLY the following 3-section structure. Only include points you can support with the data above. Be specific with numbers.
+
+## I. Context-Awareness & Summarisation
+Provide a narrative about this release transition:
+- How has the security posture of {repo} changed between releases?
+- Is the vulnerability count trending up or down? What does that indicate?
+- Has the risk profile shifted (e.g. more CRITICAL/HIGH, or improvement toward LOW)?
+- Are there recurring CWE types across both releases suggesting a systemic weakness?
+- Which new vulnerabilities are most concerning and why?
+- Were the resolved vulnerabilities genuinely fixed or just dropped from scope?
+
+## II. Impact, Health & Blast Radius
+Quantify the release comparison risk:
+- What is the net change in security debt? (total vulns, avg risk, critical count)
+- Which newly introduced CVEs have the highest blast radius? (EPSS, CVSS, tier)
+- Are there packages that persist across releases as vulnerability sources?
+- Has the patch availability rate improved or declined?
+- What is the fix rate trend? Is the team addressing issues faster or slower?
+- How does the current release compare to the previous in terms of concentrated vs distributed risk?
+
+## III. Remedy & Actionable Plans
+Provide prioritised actions for the current release:
+- What are the top 3-5 actions to improve this release's security posture?
+- Which newly introduced vulnerabilities should be fixed immediately?
+- Are there "quick win" upgrades that could resolve multiple new CVEs?
+- What CWE-class level mitigations should be implemented to prevent recurrence?
+- What should be the release gate criteria for the next release based on this trend?
+- Is this release safe to ship, or does it need a security hold?
+
+Keep each section concise (4-8 bullet points). Use specific numbers from the data. Do not invent data not provided above."""
+
+
 def build_pattern_analysis_prompt(patterns_data: dict) -> str:
     """Build a prompt for ML pattern analysis."""
     top_features = patterns_data.get("top_features", [])

@@ -51,6 +51,7 @@ pip3 install -r requirements.txt
 pip3 install -e .
 
 # 3. Generate sample data
+cd ml-pipeline
 python3 scripts/ingest.py sample -n 1000 -o data/sample_data.csv
 
 # 4. Train the model

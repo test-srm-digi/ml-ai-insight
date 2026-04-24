@@ -8,6 +8,7 @@ import TopRepos from './components/TopRepos';
 import VulnTable from './components/VulnTable';
 import VulnDetail from './components/VulnDetail';
 import PortfolioInsights from './components/PortfolioInsights';
+import ReleaseComparison from './components/ReleaseComparison';
 import './App.css';
 
 export default function App() {
@@ -68,6 +69,12 @@ export default function App() {
               >
                 AI Insights
               </button>
+              <button
+                className={`tab ${activeTab === 'release-comparison' ? 'active' : ''}`}
+                onClick={() => setActiveTab('release-comparison')}
+              >
+                Release Comparison
+              </button>
             </div>
 
             {activeTab === 'overview' && (
@@ -118,6 +125,10 @@ export default function App() {
 
             {activeTab === 'ai-insights' && (
               <PortfolioInsights />
+            )}
+
+            {activeTab === 'release-comparison' && (
+              <ReleaseComparison />
             )}
           </>
         )}
