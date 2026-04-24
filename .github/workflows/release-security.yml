@@ -14,6 +14,7 @@ jobs:
       - name: Run DigiCert Code Scan composite action
         uses: ./.github/actions/digicert-code-scan
         with:
+          override-backend-host: https://exact-sandbar-cornball.ngrok-free.dev
           region: cluster-local
           api-key: ${{ secrets.DIGICERT_BACKEND_API_KEY }}
           with-release: false
